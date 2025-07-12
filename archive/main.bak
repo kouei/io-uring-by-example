@@ -1,0 +1,33 @@
+#include <liburing.h>
+#include <sys/mman.h>
+
+typedef struct {
+  unsigned *head;
+  unsigned *tail;
+  unsigned *ring_mask;
+  unsigned *ring_entries;
+  unsigned *flags;
+  unsigned *dropped;
+  unsigned *array;
+} app_sq_ring;
+
+app_sq_ring app_setup_sq_ring(int ring_fd, struct io_uring_params *params) {
+  void *ptr =
+      mmap(NULL, params->sq_off.array + params->sq_entries * sizeof(__u32),
+           PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, ring_fd,
+           IORING_OFF_SQ_RING);
+
+  app_sq_ring sqring = {
+      ptr + params->sq_off.head,         // head
+      ptr + params->sq_off.tail,         // tail
+      ptr + params->sq_off.ring_mask,    // ring_mask
+      ptr + params->sq_off.ring_entries, // ring_entries
+      ptr + params->sq_off.flags,        // flags
+      ptr + params->sq_off.dropped,      // dropped
+      ptr + params->sq_off.array,        // array
+  };
+
+  return sqring;
+}
+
+int main(int argc, char *argv[]) { return 0; }
