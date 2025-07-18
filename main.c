@@ -55,7 +55,7 @@ struct submitter {
 
 struct file_info {
   off_t file_sz;
-  struct iovec iovecs[0]; /* Referred by readv/writev */
+  struct iovec iovecs[0]; /* Flexible Array. Referred by readv/writev */
 };
 
 /*
@@ -81,24 +81,42 @@ int io_uring_enter(__in__ int ring_fd, __in__ unsigned int to_submit,
  * Properly handles regular file and block devices as well. Pretty.
  * */
 
-off_t get_file_size(__in__ int fd) {
+off_t get_file_size(int fd) {
   struct stat st;
 
   if (fstat(fd, &st) < 0) {
-    perror("fstat");
-    return -1;
+    fprintf(stderr, "fstat");
+    exit(-1);
   }
+
+  // Is regular file
+  if (S_ISREG(st.st_mode)) {
+    return st.st_size;
+  }
+
+  // Is block device
   if (S_ISBLK(st.st_mode)) {
     unsigned long long bytes;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
-      perror("ioctl");
-      return -1;
+      fprintf(stderr, "ioctl");
+      exit(-1);
     }
-    return bytes;
-  } else if (S_ISREG(st.st_mode))
-    return st.st_size;
 
-  return -1;
+    return bytes;
+  }
+
+  exit(-1);
+}
+
+void *aligned_malloc(size_t alignment, size_t size) {
+  void *buf = NULL;
+
+  if (!posix_memalign(&buf, alignment, size)) {
+    fprintf(stderr, "posix_memalign");
+    exit(-1);
+  }
+
+  return buf;
 }
 
 /*
@@ -122,7 +140,7 @@ int app_setup_uring(__out__ struct submitter *submitter) {
   submitter->ring_fd = io_uring_setup(QUEUE_DEPTH, &params);
   if (submitter->ring_fd < 0) {
     perror("io_uring_setup");
-    return 1;
+    exit(-1);
   }
 
   /*
@@ -146,7 +164,6 @@ int app_setup_uring(__out__ struct submitter *submitter) {
   if (params.features & IORING_FEAT_SINGLE_MMAP) {
     int max_sz = max(sring_sz, cring_sz);
     sring_sz = max_sz;
-    cring_sz = max_sz;
 
     /* Map in the submission and completion queue ring buffers.
      * Older kernels only map in the submission queue, though.
@@ -156,7 +173,7 @@ int app_setup_uring(__out__ struct submitter *submitter) {
              submitter->ring_fd, IORING_OFF_SQ_RING);
     if (sq_ptr == MAP_FAILED) {
       perror("mmap");
-      return 1;
+      exit(-1);
     }
 
     cq_ptr = sq_ptr;
@@ -169,7 +186,7 @@ int app_setup_uring(__out__ struct submitter *submitter) {
              submitter->ring_fd, IORING_OFF_SQ_RING);
     if (sq_ptr == MAP_FAILED) {
       perror("mmap");
-      return 1;
+      exit(-1);
     }
 
     /* Map in the completion queue ring buffer in older kernels separately */
@@ -178,7 +195,7 @@ int app_setup_uring(__out__ struct submitter *submitter) {
              submitter->ring_fd, IORING_OFF_CQ_RING);
     if (cq_ptr == MAP_FAILED) {
       perror("mmap");
-      return 1;
+      exit(-1);
     }
   }
   /* Save useful fields in a global app_io_sq_ring struct for later
@@ -197,7 +214,7 @@ int app_setup_uring(__out__ struct submitter *submitter) {
                          submitter->ring_fd, IORING_OFF_SQES);
   if (submitter->sqes == MAP_FAILED) {
     perror("mmap");
-    return 1;
+    exit(-1);
   }
 
   /* Save useful fields in a global app_io_cq_ring struct for later
@@ -276,7 +293,7 @@ int submit_to_sq(char *file_path, struct submitter *s) {
   int file_fd = open(file_path, O_RDONLY);
   if (file_fd < 0) {
     perror("open");
-    return 1;
+    exit(-1);
   }
 
   struct app_io_sq_ring *sring = &s->sq_ring;
@@ -284,7 +301,7 @@ int submit_to_sq(char *file_path, struct submitter *s) {
 
   off_t file_sz = get_file_size(file_fd);
   if (file_sz < 0) {
-    return 1;
+    exit(-1);
   }
 
   off_t bytes_remaining = file_sz;
@@ -293,7 +310,7 @@ int submit_to_sq(char *file_path, struct submitter *s) {
   fi = malloc(sizeof(*fi) + sizeof(struct iovec) * blocks);
   if (!fi) {
     fprintf(stderr, "Unable to allocate memory\n");
-    return 1;
+    exit(-1);
   }
   fi->file_sz = file_sz;
 
@@ -308,10 +325,10 @@ int submit_to_sq(char *file_path, struct submitter *s) {
 
     fi->iovecs[current_block].iov_len = bytes_to_read;
 
-    void *buf;
-    if (posix_memalign(&buf, BLOCK_SZ, BLOCK_SZ)) {
-      perror("posix_memalign");
-      return 1;
+    void *buf = aligned_alloc(BLOCK_SZ, BLOCK_SZ);
+    if (!buf) {
+      perror("aligned_alloc");
+      exit(-1);
     }
     fi->iovecs[current_block].iov_base = buf;
 
