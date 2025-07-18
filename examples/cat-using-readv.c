@@ -10,11 +10,6 @@
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
 
-/*
- * Returns the size of the file whose open file descriptor is passed in.
- * Properly handles regular file and block devices as well. Pretty.
- * */
-
 off_t get_file_size(int fd) {
   struct stat st;
 
@@ -23,12 +18,12 @@ off_t get_file_size(int fd) {
     exit(-1);
   }
 
-  // Is regular file
+  // Regular File
   if (S_ISREG(st.st_mode)) {
     return st.st_size;
   }
 
-  // Is block device
+  // Block Device
   if (S_ISBLK(st.st_mode)) {
     unsigned long long bytes;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
@@ -53,11 +48,6 @@ void *aligned_malloc(size_t alignment, size_t size) {
   return buf;
 }
 
-/*
- * Output a string of characters of len length to stdout.
- * We use buffered output here to be efficient,
- * since we need to output character-by-character.
- * */
 void output_to_console(char *buf, int len) {
   while (len--) {
     fputc(*buf++, stdout);
@@ -72,8 +62,8 @@ void read_and_print_file(char *file_name) {
   }
 
   off_t file_sz = get_file_size(file_fd);
-  int blocks = (file_sz + BLOCK_SZ - 1) / BLOCK_SZ; // rounding-up
-  struct iovec *iovecs = malloc(sizeof(struct iovec) * blocks);
+  off_t blocks = (file_sz + BLOCK_SZ - 1) / BLOCK_SZ; // rounding-up
+  struct iovec *iovecs = malloc(sizeof(*iovecs) * blocks);
 
   /*
    * For the file we're reading, allocate enough blocks to be able to hold
@@ -81,7 +71,7 @@ void read_and_print_file(char *file_name) {
    * passed to readv as part of the array of iovecs.
    * */
   off_t bytes_remaining = file_sz;
-  for (int i = 0; i < blocks; ++i) {
+  for (off_t i = 0; i < blocks; ++i) {
     off_t bytes_to_read = min(bytes_remaining, BLOCK_SZ);
 
     iovecs[i].iov_base = aligned_malloc(BLOCK_SZ, BLOCK_SZ);
@@ -101,7 +91,7 @@ void read_and_print_file(char *file_name) {
     exit(-1);
   }
 
-  for (int i = 0; i < blocks; i++) {
+  for (int i = 0; i < blocks; ++i) {
     output_to_console(iovecs[i].iov_base, iovecs[i].iov_len);
   }
 
@@ -114,11 +104,7 @@ int main(int argc, char *argv[]) {
     exit(-1);
   }
 
-  /*
-   * For each file that is passed in as the argument, call the
-   * read_and_print_file() function.
-   * */
-  for (int i = 1; i < argc; i++) {
+  for (int i = 1; i < argc; ++i) {
     read_and_print_file(argv[i]);
   }
 
