@@ -1,4 +1,4 @@
-C_STD := -std=c11
+C_STD := -std=gnu11
 CC_FLAG := -O2 -Wall -luring $(C_STD)
 
 main: main.c
