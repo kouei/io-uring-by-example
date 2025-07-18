@@ -8,6 +8,8 @@
 
 #define BLOCK_SZ 4096
 
+#define min(x, y) ((x) < (y) ? (x) : (y))
+
 /*
  * Returns the size of the file whose open file descriptor is passed in.
  * Properly handles regular file and block devices as well. Pretty.
@@ -17,20 +19,37 @@ off_t get_file_size(int fd) {
   struct stat st;
 
   if (fstat(fd, &st) < 0) {
-    perror("fstat");
-    return -1;
+    fprintf(stderr, "fstat");
+    exit(-1);
   }
+
+  // Is regular file
+  if (S_ISREG(st.st_mode)) {
+    return st.st_size;
+  }
+
+  // Is block device
   if (S_ISBLK(st.st_mode)) {
     unsigned long long bytes;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
-      perror("ioctl");
-      return -1;
+      fprintf(stderr, "ioctl");
+      exit(-1);
     }
-    return bytes;
-  } else if (S_ISREG(st.st_mode))
-    return st.st_size;
 
-  return -1;
+    return bytes;
+  }
+
+  exit(-1);
+}
+
+void *aligned_malloc(size_t alignment, size_t size) {
+  void *buf = aligned_alloc(alignment, size);
+  if (!buf) {
+    fprintf(stderr, "aligned_alloc");
+    exit(-1);
+  }
+
+  return buf;
 }
 
 /*
@@ -44,37 +63,29 @@ void output_to_console(char *buf, int len) {
   }
 }
 
-int read_and_print_file(char *file_name) {
-  struct iovec *iovecs;
+void read_and_print_file(char *file_name) {
   int file_fd = open(file_name, O_RDONLY);
   if (file_fd < 0) {
-    perror("open");
-    return 1;
+    fprintf(stderr, "open");
+    exit(-1);
   }
 
   off_t file_sz = get_file_size(file_fd);
-  off_t bytes_remaining = file_sz;
-  int blocks = ((int)file_sz + BLOCK_SZ - 1) / BLOCK_SZ;
-  iovecs = malloc(sizeof(struct iovec) * blocks);
-
-  int current_block = 0;
+  int blocks = (file_sz + BLOCK_SZ - 1) / BLOCK_SZ; // rounding-up
+  struct iovec *iovecs = malloc(sizeof(struct iovec) * blocks);
 
   /*
    * For the file we're reading, allocate enough blocks to be able to hold
    * the file data. Each block is described in an iovec structure, which is
    * passed to readv as part of the array of iovecs.
    * */
-  while (bytes_remaining) {
-    off_t bytes_to_read = bytes_remaining < BLOCK_SZ ? bytes_remaining : BLOCK_SZ;
+  off_t bytes_remaining = file_sz;
+  for (int i = 0; i < blocks; ++i) {
+    off_t bytes_to_read = min(bytes_remaining, BLOCK_SZ);
 
-    void *buf;
-    if (posix_memalign(&buf, BLOCK_SZ, BLOCK_SZ)) {
-      perror("posix_memalign");
-      return 1;
-    }
-    iovecs[current_block].iov_base = buf;
-    iovecs[current_block].iov_len = bytes_to_read;
-    current_block++;
+    iovecs[i].iov_base = aligned_malloc(BLOCK_SZ, BLOCK_SZ);
+    iovecs[i].iov_len = bytes_to_read;
+
     bytes_remaining -= bytes_to_read;
   }
 
@@ -85,20 +96,21 @@ int read_and_print_file(char *file_name) {
    * */
   int ret = readv(file_fd, iovecs, blocks);
   if (ret < 0) {
-    perror("readv");
-    return 1;
+    fprintf(stderr, "readv");
+    exit(-1);
   }
 
-  for (int i = 0; i < blocks; i++)
+  for (int i = 0; i < blocks; i++) {
     output_to_console(iovecs[i].iov_base, iovecs[i].iov_len);
+  }
 
-  return 0;
+  free(iovecs);
 }
 
 int main(int argc, char *argv[]) {
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <filename1> [<filename2> ...]\n", argv[0]);
-    return 1;
+    exit(-1);
   }
 
   /*
@@ -106,10 +118,7 @@ int main(int argc, char *argv[]) {
    * read_and_print_file() function.
    * */
   for (int i = 1; i < argc; i++) {
-    if (read_and_print_file(argv[i])) {
-      fprintf(stderr, "Error reading file\n");
-      return 1;
-    }
+    read_and_print_file(argv[i]);
   }
 
   return 0;
