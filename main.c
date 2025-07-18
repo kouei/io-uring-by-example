@@ -26,9 +26,6 @@
 #define max(x, y) ((x) > (y) ? (x) : (y))
 #define div_round_up(x, y) (((x) + (y) - 1) / (y))
 
-#define __in__
-#define __out__
-
 struct app_io_sq_ring {
   unsigned *head;
   unsigned *tail;
@@ -64,14 +61,12 @@ struct file_info {
  * functions.
  * */
 
-int io_uring_setup(__in__ unsigned entries,
-                   __out__ struct io_uring_params *params) {
+int io_uring_setup(unsigned entries, struct io_uring_params *params) {
   return (int)syscall(__NR_io_uring_setup, entries, params);
 }
 
-int io_uring_enter(__in__ int ring_fd, __in__ unsigned int to_submit,
-                   __in__ unsigned int min_complete,
-                   __in__ unsigned int flags) {
+int io_uring_enter(int ring_fd, unsigned int to_submit,
+                   unsigned int min_complete, unsigned int flags) {
   return (int)syscall(__NR_io_uring_enter, ring_fd, to_submit, min_complete,
                       flags, NULL, 0);
 }
@@ -119,6 +114,40 @@ void *aligned_malloc(size_t alignment, size_t size) {
   return buf;
 }
 
+void print_io_uring_params(struct io_uring_params *params) {
+  fprintf(stdout, "params->sq_entries = %u\n", params->sq_entries);
+  fprintf(stdout, "params->cq_entries = %u\n", params->cq_entries);
+  fprintf(stdout, "params->flags = %u\n", params->flags);
+  fprintf(stdout, "params->sq_thread_cpu = %u\n", params->sq_thread_cpu);
+  fprintf(stdout, "params->sq_thread_idle = %u\n", params->sq_thread_idle);
+  fprintf(stdout, "params->features = %u\n", params->features);
+  fprintf(stdout, "params->wq_fd = %u\n\n", params->wq_fd);
+
+  fprintf(stdout, "params->sq_off.head = %u\n", params->sq_off.head);
+  fprintf(stdout, "params->sq_off.tail = %u\n", params->sq_off.tail);
+  fprintf(stdout, "params->sq_off.ring_mask = %u\n", params->sq_off.ring_mask);
+  fprintf(stdout, "params->sq_off.ring_entries = %u\n",
+          params->sq_off.ring_entries);
+  fprintf(stdout, "params->sq_off.flags = %u\n", params->sq_off.flags);
+  fprintf(stdout, "params->sq_off.dropped = %u\n", params->sq_off.dropped);
+  fprintf(stdout, "params->sq_off.array = %u\n", params->sq_off.array);
+  fprintf(stdout, "params->sq_off.resv1 = %u\n", params->sq_off.resv1);
+  fprintf(stdout, "params->sq_off.user_addr = %llu\n\n",
+          params->sq_off.user_addr);
+
+  fprintf(stdout, "params->cq_off.head = %u\n", params->cq_off.head);
+  fprintf(stdout, "params->cq_off.tail = %u\n", params->cq_off.tail);
+  fprintf(stdout, "params->cq_off.ring_mask = %u\n", params->cq_off.ring_mask);
+  fprintf(stdout, "params->cq_off.ring_entries = %u\n",
+          params->cq_off.ring_entries);
+  fprintf(stdout, "params->cq_off.overflow = %u\n", params->cq_off.overflow);
+  fprintf(stdout, "params->cq_off.cqes = %u\n", params->cq_off.cqes);
+  fprintf(stdout, "params->cq_off.flags = %u\n", params->cq_off.flags);
+  fprintf(stdout, "params->cq_off.resv1 = %u\n", params->cq_off.resv1);
+  fprintf(stdout, "params->cq_off.user_addr = %llu\n",
+          params->cq_off.user_addr);
+}
+
 /*
  * io_uring requires a lot of setup which looks pretty hairy, but isn't all
  * that difficult to understand. Because of all this boilerplate code,
@@ -128,20 +157,20 @@ void *aligned_malloc(size_t alignment, size_t size) {
  * it does offer you a certain strange geeky peace.
  * */
 
-int app_setup_uring(__out__ struct submitter *submitter) {
-  struct io_uring_params params = {}; // Has to be zeroed out
-  void *sq_ptr, *cq_ptr;
-
+int app_setup_uring(struct submitter *submitter) {
   /*
    * We need to pass in the io_uring_params structure to the io_uring_setup()
    * call zeroed out. We could set any flags if we need to, but for this
    * example, we don't.
    * */
+  struct io_uring_params params = {}; // Has to be zeroed out
   submitter->ring_fd = io_uring_setup(QUEUE_DEPTH, &params);
   if (submitter->ring_fd < 0) {
     perror("io_uring_setup");
     exit(-1);
   }
+
+  print_io_uring_params(&params);
 
   /*
    * io_uring communication happens via 2 shared kernel-user space ring buffers,
@@ -161,9 +190,9 @@ int app_setup_uring(__out__ struct submitter *submitter) {
    * IORING_FEAT_SINGLE_MMAP is set, then we can do away with the second mmap()
    * call to map the completion ring.
    * */
+  void *sq_ptr, *cq_ptr;
   if (params.features & IORING_FEAT_SINGLE_MMAP) {
-    int max_sz = max(sring_sz, cring_sz);
-    sring_sz = max_sz;
+    sring_sz = max(sring_sz, cring_sz);
 
     /* Map in the submission and completion queue ring buffers.
      * Older kernels only map in the submission queue, though.
@@ -377,19 +406,20 @@ int main(int argc, char *argv[]) {
 
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
-    return 1;
+    exit(-1);
   }
 
   if (app_setup_uring(&submitter)) {
     fprintf(stderr, "Unable to setup uring!\n");
-    return 1;
+    exit(-1);
   }
 
   for (int i = 1; i < argc; i++) {
     if (submit_to_sq(argv[i], &submitter)) {
       fprintf(stderr, "Error reading file\n");
-      return 1;
+      exit(-1);
     }
+
     read_from_cq(&submitter);
   }
 
