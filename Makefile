@@ -9,5 +9,8 @@ main: main.c
 clang-tidy:
 	clang-tidy ./main.c -- $(C_STD)
 
+clang-format:
+	clang-format -i ./main.c
+
 clean:
 	rm -f main
