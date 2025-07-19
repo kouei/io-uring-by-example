@@ -40,7 +40,7 @@ off_t get_file_size(int fd) {
 void *aligned_malloc(size_t alignment, size_t size) {
   void *buf = NULL;
 
-  if (!posix_memalign(&buf, alignment, size)) {
+  if (posix_memalign(&buf, alignment, size)) {
     fprintf(stderr, "posix_memalign");
     exit(-1);
   }
@@ -74,8 +74,8 @@ void read_and_print_file(char *file_name) {
   for (off_t i = 0; i < blocks; ++i) {
     off_t bytes_to_read = min(bytes_remaining, BLOCK_SZ);
 
-    iovecs[i].iov_base = aligned_malloc(BLOCK_SZ, BLOCK_SZ);
     iovecs[i].iov_len = bytes_to_read;
+    iovecs[i].iov_base = aligned_malloc(BLOCK_SZ, BLOCK_SZ);
 
     bytes_remaining -= bytes_to_read;
   }
