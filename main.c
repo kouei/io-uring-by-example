@@ -279,7 +279,7 @@ void read_from_cq(struct submitter *submitter) {
 
   unsigned head = *cq_ring->head;
   do {
-    read_barrier(); // Make sure latest change to CQ tail is visible.
+    read_barrier(); // Ensure latest change to CQ tail is visible to user app.
 
     /* CQ is empty */
     if (head == *cq_ring->tail) {
@@ -287,7 +287,7 @@ void read_from_cq(struct submitter *submitter) {
     }
 
     /* Get the entry */
-    unsigned cqe_index = head & *cq_ring->ring_mask;
+    unsigned cqe_index = head & (*cq_ring->ring_mask);
     struct io_uring_cqe *cqe = &cq_ring->cqes[cqe_index];
     if (cqe->res < 0) {
       fprintf(stderr, "Error: %s\n", strerror(abs(cqe->res)));
@@ -300,7 +300,7 @@ void read_from_cq(struct submitter *submitter) {
   } while (1);
 
   *cq_ring->head = head;
-  write_barrier(); // Make sure the change to CQ head is visible to kernel.
+  write_barrier(); // Ensure latest change to CQ head is visible to kernel.
 }
 
 /*
@@ -310,27 +310,23 @@ void read_from_cq(struct submitter *submitter) {
  * specify via IORING_OP_READV.
  *
  * */
-int submit_to_sq(char *file_path, struct submitter *s) {
-  struct file_info *fi;
-
+int submit_to_sq(char *file_path, struct submitter *submitter) {
   int file_fd = open(file_path, O_RDONLY);
   if (file_fd < 0) {
     fprintf(stderr, "open");
     exit(-1);
   }
 
-  struct app_io_sq_ring *sring = &s->sq_ring;
-  unsigned index = 0, current_block = 0, tail = 0;
+  unsigned current_block = 0, tail = 0;
 
   off_t file_sz = get_file_size(file_fd);
   if (file_sz < 0) {
     exit(-1);
   }
 
-  off_t bytes_remaining = file_sz;
   int blocks = div_round_up(file_sz, BLOCK_SZ);
 
-  fi = malloc(sizeof(*fi) + sizeof(struct iovec) * blocks);
+  struct file_info *fi = malloc(sizeof(*fi) + sizeof(fi->iovecs[0]) * blocks);
   if (!fi) {
     fprintf(stderr, "Unable to allocate memory\n");
     exit(-1);
@@ -343,27 +339,23 @@ int submit_to_sq(char *file_path, struct submitter *s) {
    * of the submission. If you don't understand this, then you need to look
    * up how the readv() and writev() system calls work.
    * */
+  off_t bytes_remaining = file_sz;
   while (bytes_remaining) {
     off_t bytes_to_read = min(bytes_remaining, BLOCK_SZ);
 
     fi->iovecs[current_block].iov_len = bytes_to_read;
-
-    void *buf = aligned_alloc(BLOCK_SZ, BLOCK_SZ);
-    if (!buf) {
-      fprintf(stderr, "aligned_alloc");
-      exit(-1);
-    }
-    fi->iovecs[current_block].iov_base = buf;
+    fi->iovecs[current_block].iov_base = aligned_malloc(BLOCK_SZ, BLOCK_SZ);
 
     current_block++;
     bytes_remaining -= bytes_to_read;
   }
 
   /* Add our submission queue entry to the tail of the SQE ring buffer */
-  tail = *sring->tail;
+  struct app_io_sq_ring *sq_ring = &submitter->sq_ring;
+  tail = *sq_ring->tail;
   read_barrier();
-  index = tail & *s->sq_ring.ring_mask;
-  struct io_uring_sqe *sqe = &s->sq_ring.sqes[index];
+  unsigned index = tail & *submitter->sq_ring.ring_mask;
+  struct io_uring_sqe *sqe = &submitter->sq_ring.sqes[index];
   sqe->fd = file_fd;
   sqe->flags = 0;
   sqe->opcode = IORING_OP_READV;
@@ -371,12 +363,12 @@ int submit_to_sq(char *file_path, struct submitter *s) {
   sqe->len = blocks;
   sqe->off = 0;
   sqe->user_data = (unsigned long long)fi;
-  sring->array[index] = index;
+  sq_ring->array[index] = index;
   tail++;
 
   /* Update the tail so the kernel can see it. */
-  if (*sring->tail != tail) {
-    *sring->tail = tail;
+  if (*sq_ring->tail != tail) {
+    *sq_ring->tail = tail;
     write_barrier();
   }
 
@@ -386,7 +378,7 @@ int submit_to_sq(char *file_path, struct submitter *s) {
    * io_uring_enter() call to wait until min_complete events (the 3rd param)
    * complete.
    * */
-  int ret = io_uring_enter(s->ring_fd, 1, 1, IORING_ENTER_GETEVENTS);
+  int ret = io_uring_enter(submitter->ring_fd, 1, 1, IORING_ENTER_GETEVENTS);
   if (ret < 0) {
     fprintf(stderr, "io_uring_enter");
     return 1;
