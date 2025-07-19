@@ -193,43 +193,35 @@ int app_setup_uring(struct submitter *submitter) {
   void *sq_ptr, *cq_ptr;
   if (params.features & IORING_FEAT_SINGLE_MMAP) {
     sring_sz = max(sring_sz, cring_sz);
-
-    /* Map in the submission and completion queue ring buffers.
-     * Older kernels only map in the submission queue, though.
-     * */
     sq_ptr =
         mmap(0, sring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
              submitter->ring_fd, IORING_OFF_SQ_RING);
     if (sq_ptr == MAP_FAILED) {
-      fprintf(stderr, "mmap");
+      fprintf(stderr, "mmap SQ");
       exit(-1);
     }
 
     cq_ptr = sq_ptr;
   } else {
-    /* Map in the submission and completion queue ring buffers.
-     * Older kernels only map in the submission queue, though.
-     * */
     sq_ptr =
         mmap(NULL, sring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
              submitter->ring_fd, IORING_OFF_SQ_RING);
     if (sq_ptr == MAP_FAILED) {
-      fprintf(stderr, "mmap");
+      fprintf(stderr, "mmap SQ");
       exit(-1);
     }
 
-    /* Map in the completion queue ring buffer in older kernels separately */
     cq_ptr =
         mmap(NULL, cring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
              submitter->ring_fd, IORING_OFF_CQ_RING);
     if (cq_ptr == MAP_FAILED) {
-      fprintf(stderr, "mmap");
+      fprintf(stderr, "mmap CQ");
       exit(-1);
     }
   }
+
   /* Save useful fields in a global app_io_sq_ring struct for later
    * easy reference */
-
   submitter->sq_ring.head = sq_ptr + params.sq_off.head;
   submitter->sq_ring.tail = sq_ptr + params.sq_off.tail;
   submitter->sq_ring.ring_mask = sq_ptr + params.sq_off.ring_mask;
@@ -242,7 +234,7 @@ int app_setup_uring(struct submitter *submitter) {
                          PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
                          submitter->ring_fd, IORING_OFF_SQES);
   if (submitter->sqes == MAP_FAILED) {
-    fprintf(stderr, "mmap");
+    fprintf(stderr, "mmap SQE array");
     exit(-1);
   }
 
