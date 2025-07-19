@@ -166,7 +166,7 @@ int app_setup_uring(struct submitter *submitter) {
   struct io_uring_params params = {}; // Has to be zeroed out
   submitter->ring_fd = io_uring_setup(QUEUE_DEPTH, &params);
   if (submitter->ring_fd < 0) {
-    perror("io_uring_setup");
+    fprintf(stderr, "io_uring_setup");
     exit(-1);
   }
 
@@ -201,7 +201,7 @@ int app_setup_uring(struct submitter *submitter) {
         mmap(0, sring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
              submitter->ring_fd, IORING_OFF_SQ_RING);
     if (sq_ptr == MAP_FAILED) {
-      perror("mmap");
+      fprintf(stderr, "mmap");
       exit(-1);
     }
 
@@ -211,19 +211,19 @@ int app_setup_uring(struct submitter *submitter) {
      * Older kernels only map in the submission queue, though.
      * */
     sq_ptr =
-        mmap(0, sring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
+        mmap(NULL, sring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
              submitter->ring_fd, IORING_OFF_SQ_RING);
     if (sq_ptr == MAP_FAILED) {
-      perror("mmap");
+      fprintf(stderr, "mmap");
       exit(-1);
     }
 
     /* Map in the completion queue ring buffer in older kernels separately */
     cq_ptr =
-        mmap(0, cring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
+        mmap(NULL, cring_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
              submitter->ring_fd, IORING_OFF_CQ_RING);
     if (cq_ptr == MAP_FAILED) {
-      perror("mmap");
+      fprintf(stderr, "mmap");
       exit(-1);
     }
   }
@@ -242,7 +242,7 @@ int app_setup_uring(struct submitter *submitter) {
                          PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
                          submitter->ring_fd, IORING_OFF_SQES);
   if (submitter->sqes == MAP_FAILED) {
-    perror("mmap");
+    fprintf(stderr, "mmap");
     exit(-1);
   }
 
@@ -321,7 +321,7 @@ int submit_to_sq(char *file_path, struct submitter *s) {
 
   int file_fd = open(file_path, O_RDONLY);
   if (file_fd < 0) {
-    perror("open");
+    fprintf(stderr, "open");
     exit(-1);
   }
 
@@ -356,7 +356,7 @@ int submit_to_sq(char *file_path, struct submitter *s) {
 
     void *buf = aligned_alloc(BLOCK_SZ, BLOCK_SZ);
     if (!buf) {
-      perror("aligned_alloc");
+      fprintf(stderr, "aligned_alloc");
       exit(-1);
     }
     fi->iovecs[current_block].iov_base = buf;
@@ -394,7 +394,7 @@ int submit_to_sq(char *file_path, struct submitter *s) {
    * */
   int ret = io_uring_enter(s->ring_fd, 1, 1, IORING_ENTER_GETEVENTS);
   if (ret < 0) {
-    perror("io_uring_enter");
+    fprintf(stderr, "io_uring_enter");
     return 1;
   }
 
