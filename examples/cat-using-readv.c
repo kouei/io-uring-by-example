@@ -9,6 +9,7 @@
 #define BLOCK_SZ 4096
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
+#define div_round_up(x, y) (((x) + (y) - 1) / (y))
 
 off_t get_file_size(int fd) {
   struct stat st;
@@ -62,7 +63,7 @@ void read_and_print_file(char *file_name) {
   }
 
   off_t file_sz = get_file_size(file_fd);
-  off_t blocks = (file_sz + BLOCK_SZ - 1) / BLOCK_SZ; // rounding-up
+  off_t blocks = div_round_up(file_sz, BLOCK_SZ);
   struct iovec *iovecs = malloc(sizeof(*iovecs) * blocks);
 
   /*
