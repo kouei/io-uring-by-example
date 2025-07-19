@@ -33,6 +33,7 @@ struct app_io_sq_ring {
   unsigned *ring_entries;
   unsigned *flags;
   unsigned *array;
+  struct io_uring_sqe *sqes;
 };
 
 struct app_io_cq_ring {
@@ -46,7 +47,6 @@ struct app_io_cq_ring {
 struct submitter {
   int ring_fd;
   struct app_io_sq_ring sq_ring;
-  struct io_uring_sqe *sqes;
   struct app_io_cq_ring cq_ring;
 };
 
@@ -230,10 +230,11 @@ int app_setup_uring(struct submitter *submitter) {
   submitter->sq_ring.array = sq_ptr + params.sq_off.array;
 
   /* Map in the submission queue entries array */
-  submitter->sqes = mmap(0, params.sq_entries * sizeof(struct io_uring_sqe),
-                         PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
-                         submitter->ring_fd, IORING_OFF_SQES);
-  if (submitter->sqes == MAP_FAILED) {
+  size_t sqe_array_sz = params.sq_entries * sizeof(struct io_uring_sqe);
+  submitter->sq_ring.sqes =
+      mmap(0, sqe_array_sz, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
+           submitter->ring_fd, IORING_OFF_SQES);
+  if (submitter->sq_ring.sqes == MAP_FAILED) {
     fprintf(stderr, "mmap SQE array");
     exit(-1);
   }
@@ -260,47 +261,48 @@ void output_to_console(char *buf, int len) {
   }
 }
 
+void print_file(struct file_info *fi) {
+  int blocks = div_round_up(fi->file_sz, BLOCK_SZ);
+  for (int i = 0; i < blocks; i++) {
+    output_to_console(fi->iovecs[i].iov_base, fi->iovecs[i].iov_len);
+  }
+}
+
 /*
  * Read from completion queue.
  * In this function, we read completion events from the completion queue, get
  * the data buffer that will have the file data and print it to the console.
  * */
 
-void read_from_cq(struct submitter *s) {
-  struct file_info *fi;
-  struct app_io_cq_ring *cring = &s->cq_ring;
-  struct io_uring_cqe *cqe;
-  unsigned head = 0;
+void read_from_cq(struct submitter *submitter) {
+  struct app_io_cq_ring *cq_ring = &submitter->cq_ring;
 
-  head = *cring->head;
-
+  unsigned head = *cq_ring->head;
   do {
-    read_barrier();
-    /*
-     * Remember, this is a ring buffer. If head == tail, it means that the
-     * buffer is empty.
-     * */
-    if (head == *cring->tail)
+    read_barrier(); // Make sure latest change to CQ tail is visible.
+
+    /* CQ is empty */
+    if (head == *cq_ring->tail) {
       break;
-
-    /* Get the entry */
-    cqe = &cring->cqes[head & *s->cq_ring.ring_mask];
-    fi = (struct file_info *)cqe->user_data;
-    if (cqe->res < 0)
-      fprintf(stderr, "Error: %s\n", strerror(abs(cqe->res)));
-
-    int blocks = div_round_up(fi->file_sz, BLOCK_SZ);
-
-    for (int i = 0; i < blocks; i++) {
-      output_to_console(fi->iovecs[i].iov_base, fi->iovecs[i].iov_len);
     }
 
-    head++;
+    /* Get the entry */
+    unsigned cqe_index = head & *cq_ring->ring_mask;
+    struct io_uring_cqe *cqe = &cq_ring->cqes[cqe_index];
+    if (cqe->res < 0) {
+      fprintf(stderr, "Error: %s\n", strerror(abs(cqe->res)));
+    }
+
+    struct file_info *fi = (struct file_info *)cqe->user_data;
+    print_file(fi);
+
+    head += 1;
   } while (1);
 
-  *cring->head = head;
-  write_barrier();
+  *cq_ring->head = head;
+  write_barrier(); // Make sure the change to CQ head is visible to kernel.
 }
+
 /*
  * Submit to submission queue.
  * In this function, we submit requests to the submission queue. You can submit
@@ -361,7 +363,7 @@ int submit_to_sq(char *file_path, struct submitter *s) {
   tail = *sring->tail;
   read_barrier();
   index = tail & *s->sq_ring.ring_mask;
-  struct io_uring_sqe *sqe = &s->sqes[index];
+  struct io_uring_sqe *sqe = &s->sq_ring.sqes[index];
   sqe->fd = file_fd;
   sqe->flags = 0;
   sqe->opcode = IORING_OP_READV;
