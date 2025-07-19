@@ -106,7 +106,7 @@ off_t get_file_size(int fd) {
 void *aligned_malloc(size_t alignment, size_t size) {
   void *buf = NULL;
 
-  if (!posix_memalign(&buf, alignment, size)) {
+  if (posix_memalign(&buf, alignment, size)) {
     fprintf(stderr, "posix_memalign");
     exit(-1);
   }
