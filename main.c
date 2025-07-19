@@ -121,12 +121,6 @@ void submit_read_request(char *file_path, struct io_uring *ring) {
   }
   fi->file_sz = file_sz;
 
-  /*
-   * For each block of the file we need to read, we allocate an iovec struct
-   * which is indexed into the iovecs array. This array is passed in as part
-   * of the submission. If you don't understand this, then you need to look
-   * up how the readv() and writev() system calls work.
-   * */
   off_t bytes_remaining = file_sz;
   for (off_t i = 0; i < blocks; ++i) {
     off_t bytes_to_read = min(bytes_remaining, BLOCK_SZ);
