@@ -310,21 +310,19 @@ void read_from_cq(struct submitter *submitter) {
  * specify via IORING_OP_READV.
  *
  * */
-int submit_to_sq(char *file_path, struct submitter *submitter) {
+void submit_to_sq(char *file_path, struct submitter *submitter) {
   int file_fd = open(file_path, O_RDONLY);
   if (file_fd < 0) {
     fprintf(stderr, "open");
     exit(-1);
   }
 
-  unsigned current_block = 0, tail = 0;
-
   off_t file_sz = get_file_size(file_fd);
   if (file_sz < 0) {
     exit(-1);
   }
 
-  int blocks = div_round_up(file_sz, BLOCK_SZ);
+  off_t blocks = div_round_up(file_sz, BLOCK_SZ);
 
   struct file_info *fi = malloc(sizeof(*fi) + sizeof(fi->iovecs[0]) * blocks);
   if (!fi) {
@@ -333,38 +331,34 @@ int submit_to_sq(char *file_path, struct submitter *submitter) {
   }
   fi->file_sz = file_sz;
 
-  /*
-   * For each block of the file we need to read, we allocate an iovec struct
-   * which is indexed into the iovecs array. This array is passed in as part
-   * of the submission. If you don't understand this, then you need to look
-   * up how the readv() and writev() system calls work.
-   * */
   off_t bytes_remaining = file_sz;
-  while (bytes_remaining) {
+  for (off_t i = 0; i < blocks; ++i) {
     off_t bytes_to_read = min(bytes_remaining, BLOCK_SZ);
 
-    fi->iovecs[current_block].iov_len = bytes_to_read;
-    fi->iovecs[current_block].iov_base = aligned_malloc(BLOCK_SZ, BLOCK_SZ);
+    fi->iovecs[i].iov_len = bytes_to_read;
+    fi->iovecs[i].iov_base = aligned_malloc(BLOCK_SZ, BLOCK_SZ);
 
-    current_block++;
     bytes_remaining -= bytes_to_read;
   }
 
   /* Add our submission queue entry to the tail of the SQE ring buffer */
   struct app_io_sq_ring *sq_ring = &submitter->sq_ring;
-  tail = *sq_ring->tail;
+  unsigned tail = *sq_ring->tail;
+
   read_barrier();
   unsigned index = tail & *submitter->sq_ring.ring_mask;
   struct io_uring_sqe *sqe = &submitter->sq_ring.sqes[index];
+
   sqe->fd = file_fd;
   sqe->flags = 0;
   sqe->opcode = IORING_OP_READV;
-  sqe->addr = (unsigned long)fi->iovecs;
+  sqe->addr = (unsigned long long)fi->iovecs;
   sqe->len = blocks;
   sqe->off = 0;
   sqe->user_data = (unsigned long long)fi;
   sq_ring->array[index] = index;
-  tail++;
+
+  tail += 1;
 
   /* Update the tail so the kernel can see it. */
   if (*sq_ring->tail != tail) {
@@ -381,31 +375,24 @@ int submit_to_sq(char *file_path, struct submitter *submitter) {
   int ret = io_uring_enter(submitter->ring_fd, 1, 1, IORING_ENTER_GETEVENTS);
   if (ret < 0) {
     fprintf(stderr, "io_uring_enter");
-    return 1;
+    exit(-1);
   }
-
-  return 0;
 }
 
 int main(int argc, char *argv[]) {
-  struct submitter submitter = {}; //
-
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
     exit(-1);
   }
 
+  struct submitter submitter = {};
   if (app_setup_uring(&submitter)) {
     fprintf(stderr, "Unable to setup uring!\n");
     exit(-1);
   }
 
   for (int i = 1; i < argc; i++) {
-    if (submit_to_sq(argv[i], &submitter)) {
-      fprintf(stderr, "Error reading file\n");
-      exit(-1);
-    }
-
+    submit_to_sq(argv[i], &submitter);
     read_from_cq(&submitter);
   }
 
