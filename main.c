@@ -150,14 +150,15 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
       if (!already_found_completed_task) {
         int ret = io_uring_wait_cqe(ring, &cqe);
         if (ret < 0) {
-          fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
+          fprintf(stderr, "io_uring_wait_cqe: %s\n", strerror(-ret));
           exit(-1);
         }
 
         already_found_completed_task = true;
       } else {
         int ret = io_uring_peek_cqe(ring, &cqe);
-        if (ret == -EAGAIN) { // EAGAIN means retry.
+        if (ret == -EAGAIN) { // EAGAIN means retry. It also means currently CQ
+                              // is empty.
           break;
         }
 
