@@ -154,14 +154,19 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
     }
 
     if (is_any_new_read_task) {
-      int ret = io_uring_submit(ring);
+      int ret = io_uring_submit(ring); // Submit new read tasks to SQ
       if (ret < 0) {
         fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
         exit(-1);
       }
     }
 
-    /* Queue is full at this point. Let's find at least one completion */
+    /*
+     * Now we have submitted read tasks, let's deal with write tasks.
+     * When shall we start any write task?
+     * The answer is when some previous read task has completed.
+     * That means we have to fetch some CQE before we can start a write task.
+     * */
     struct io_uring_cqe *cqe;
     bool is_any_completed_task = false;
     while (bytes_to_write > 0) {
