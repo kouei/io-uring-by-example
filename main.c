@@ -76,31 +76,32 @@ static void queue_prepped(struct io_uring *ring, struct io_data *data) {
   io_uring_sqe_set_data(sqe, data);
 }
 
-struct io_data *create_io_data(enum io_type type, off_t size, off_t offset) {
+struct io_data *allocate_io_data(enum io_type type, off_t size) {
   struct io_data *data = malloc(sizeof(*data) + size);
   if (!data) {
-    fprintf(stderr, "create_io_data() failed.");
+    fprintf(stderr, "allocate_io_data() failed.");
     exit(-1);
   }
 
-  data->type = type;
+  return data;
+}
+
+void deallocate_io_data(struct io_data *data) { free(data); }
+
+static int queue_read(struct io_uring *ring, struct io_data *data, off_t size,
+                      off_t offset) {
+  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+  if (!sqe) {
+    return 1;
+  }
+
+  data->type = READ;
   data->initial_offset = offset;
   data->offset = offset;
   data->initial_len = size;
 
   data->iov.iov_base = data->bytes;
   data->iov.iov_len = size;
-
-  return data;
-}
-
-void free_io_data(struct io_data *data) { free(data); }
-
-static int queue_read(struct io_uring *ring, struct io_data *data) {
-  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-  if (!sqe) {
-    return 1;
-  }
 
   io_uring_prep_readv(sqe, infd, &data->iov, 1, data->offset);
   io_uring_sqe_set_data(sqe, data);
@@ -139,9 +140,10 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
       }
 
       off_t read_size = min(bytes_to_read, BLOCK_SZ);
-      struct io_data *data = create_io_data(READ, read_size, read_offset);
+      struct io_data *data = allocate_io_data(READ, read_size);
 
-      if (queue_read(ring, data)) {
+      if (queue_read(ring, data, read_size, read_offset)) {
+        deallocate_io_data(data);
         break;
       }
 
@@ -216,7 +218,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
         write_tasks += 1;
       } else { // A write task has completed
         bytes_to_write -= data->initial_len;
-        free_io_data(data);
+        deallocate_io_data(data);
         write_tasks -= 1;
       }
 
