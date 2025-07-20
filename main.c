@@ -19,7 +19,7 @@ struct io_task {
   bool is_read;
   off_t initial_offset;
   off_t offset;
-  size_t first_len;
+  size_t initial_len;
   struct iovec iov;
   char bytes[0]; /* Flexible Array. Real Data Payload. */
 };
@@ -92,7 +92,7 @@ static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
 
   data->iov.iov_base = data->bytes;
   data->iov.iov_len = size;
-  data->first_len = size;
+  data->initial_len = size;
 
   io_uring_prep_readv(sqe, infd, &data->iov, 1, offset);
   io_uring_sqe_set_data(sqe, data);
@@ -104,33 +104,33 @@ static void queue_write(struct io_uring *ring, struct io_task *data) {
   data->offset = data->initial_offset;
 
   data->iov.iov_base = data->bytes;
-  data->iov.iov_len = data->first_len;
+  data->iov.iov_len = data->initial_len;
 
   queue_prepped(ring, data);
   io_uring_submit(ring);
 }
 
-int copy_file(struct io_uring *ring, off_t insize) {
-  off_t write_left = insize;
+int copy_file(struct io_uring *ring, off_t bytes_to_read) {
+  off_t bytes_to_write = bytes_to_read;
   unsigned long reads = 0;
   unsigned long writes = 0;
   off_t offset = 0;
 
-  while (insize || write_left) {
+  while (bytes_to_read > 0 || bytes_to_write > 0) {
     int had_reads, got_comp;
 
     /* Queue up as many reads as we can */
     had_reads = reads;
-    while (insize) {
+    while (bytes_to_read > 0) {
       if (reads + writes >= QUEUE_DEPTH)
         break;
 
-      off_t this_size = min(insize, BLOCK_SZ);
+      off_t this_size = min(bytes_to_read, BLOCK_SZ);
 
       if (queue_read(ring, this_size, offset))
         break;
 
-      insize -= this_size;
+      bytes_to_read -= this_size;
       offset += this_size;
       reads++;
     }
@@ -145,7 +145,7 @@ int copy_file(struct io_uring *ring, off_t insize) {
 
     /* Queue is full at this point. Let's find at least one completion */
     got_comp = 0;
-    while (write_left) {
+    while (bytes_to_write > 0) {
       int ret;
       struct io_uring_cqe *cqe;
       if (!got_comp) {
@@ -193,7 +193,7 @@ int copy_file(struct io_uring *ring, off_t insize) {
         reads--;
         writes++;
       } else {
-        write_left -= data->first_len;
+        bytes_to_write -= data->initial_len;
         free(data);
         writes--;
       }
