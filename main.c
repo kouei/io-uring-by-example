@@ -76,25 +76,33 @@ static void queue_prepped(struct io_uring *ring, struct io_data *data) {
   io_uring_sqe_set_data(sqe, data);
 }
 
-static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
+struct io_data *create_io_data(enum io_type type, off_t size, off_t offset) {
+  struct io_data *data = malloc(sizeof(*data) + size);
+  if (!data) {
+    fprintf(stderr, "create_io_data() failed.");
+    exit(-1);
+  }
+
+  data->type = type;
+  data->initial_offset = offset;
+  data->offset = offset;
+  data->initial_len = size;
+
+  data->iov.iov_base = data->bytes;
+  data->iov.iov_len = size;
+
+  return data;
+}
+
+void free_io_data(struct io_data *data) { free(data); }
+
+static int queue_read(struct io_uring *ring, struct io_data *data) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
   if (!sqe) {
     return 1;
   }
 
-  struct io_data *data = malloc(sizeof(*data) + size);
-  if (!data) {
-    return 1;
-  }
-
-  data->type = READ;
-  data->offset = data->initial_offset = offset;
-
-  data->iov.iov_base = data->bytes;
-  data->iov.iov_len = size;
-  data->initial_len = size;
-
-  io_uring_prep_readv(sqe, infd, &data->iov, 1, offset);
+  io_uring_prep_readv(sqe, infd, &data->iov, 1, data->offset);
   io_uring_sqe_set_data(sqe, data);
   return 0;
 }
@@ -113,9 +121,7 @@ static void queue_write(struct io_uring *ring, struct io_data *data) {
   data->iov.iov_len = data->initial_len;
 
   io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
-
   io_uring_sqe_set_data(sqe, data);
-
   io_uring_submit(ring);
 }
 
@@ -134,7 +140,9 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
       }
 
       off_t read_size = min(bytes_to_read, BLOCK_SZ);
-      if (queue_read(ring, read_size, read_offset)) {
+      struct io_data *data = create_io_data(READ, read_size, read_offset);
+
+      if (queue_read(ring, data)) {
         break;
       }
 
@@ -208,7 +216,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
         write_tasks += 1;
       } else { // A write task has completed
         bytes_to_write -= data->initial_len;
-        free(data);
+        free_io_data(data);
         write_tasks -= 1;
       }
 
