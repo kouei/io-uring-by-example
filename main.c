@@ -112,18 +112,17 @@ static void queue_write(struct io_uring *ring, struct io_task *data) {
 
 int copy_file(struct io_uring *ring, off_t bytes_to_read) {
   off_t bytes_to_write = bytes_to_read;
-  unsigned long reads = 0;
-  unsigned long writes = 0;
+  unsigned long read_tasks = 0;
+  unsigned long write_tasks = 0;
   off_t offset = 0;
 
   while (bytes_to_read > 0 || bytes_to_write > 0) {
-    int had_reads, got_comp;
-
     /* Queue up as many reads as we can */
-    had_reads = reads;
+    int had_reads = read_tasks;
     while (bytes_to_read > 0) {
-      if (reads + writes >= QUEUE_DEPTH)
+      if (read_tasks + write_tasks >= QUEUE_DEPTH) {
         break;
+      }
 
       off_t this_size = min(bytes_to_read, BLOCK_SZ);
 
@@ -132,10 +131,10 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       bytes_to_read -= this_size;
       offset += this_size;
-      reads++;
+      read_tasks += 1;
     }
 
-    if (had_reads != reads) {
+    if (had_reads != read_tasks) {
       int ret = io_uring_submit(ring);
       if (ret < 0) {
         fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
@@ -144,7 +143,7 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
     }
 
     /* Queue is full at this point. Let's find at least one completion */
-    got_comp = 0;
+    int got_comp = 0;
     while (bytes_to_write > 0) {
       int ret;
       struct io_uring_cqe *cqe;
@@ -190,12 +189,12 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       if (data->is_read) {
         queue_write(ring, data);
-        reads--;
-        writes++;
+        read_tasks -= 1;
+        write_tasks += 1;
       } else {
         bytes_to_write -= data->initial_len;
         free(data);
-        writes--;
+        write_tasks -= 1;
       }
       io_uring_cqe_seen(ring, cqe);
     }
