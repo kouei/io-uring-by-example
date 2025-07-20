@@ -86,7 +86,7 @@ static void prepare_sqe(struct io_uring_sqe *sqe, struct io_data *data) {
 void spawn_read_tasks(struct io_uring *ring, off_t *bytes_to_read,
                       off_t *read_offset) {
   /* Queue up as many reads as we can */
-  bool is_any_new_read_task = false;
+  bool is_any_new_task = false;
   while (*bytes_to_read > 0) {
     struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
     if (!sqe) { // SQ is full
@@ -107,10 +107,10 @@ void spawn_read_tasks(struct io_uring *ring, off_t *bytes_to_read,
 
     *bytes_to_read -= read_size;
     *read_offset += read_size;
-    is_any_new_read_task = true;
+    is_any_new_task = true;
   }
 
-  if (is_any_new_read_task) {
+  if (is_any_new_task) {
     int ret = io_uring_submit(ring); // Submit new read tasks to SQ
     if (ret < 0) {
       fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
