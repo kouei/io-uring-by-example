@@ -110,9 +110,7 @@ static void queue_write(struct io_uring *ring, struct io_data *data) {
   io_uring_submit(ring);
 }
 
-int copy_file(struct io_uring *ring, off_t bytes_to_read) {
-  int ret;
-
+void copy_file(struct io_uring *ring, off_t bytes_to_read) {
   off_t bytes_to_write = bytes_to_read;
   unsigned long read_tasks = 0;
   unsigned long write_tasks = 0;
@@ -139,10 +137,10 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
     }
 
     if (!is_queue_full) {
-      ret = io_uring_submit(ring);
+      int ret = io_uring_submit(ring);
       if (ret < 0) {
         fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
-        break;
+        exit(-1);
       }
     }
 
@@ -150,6 +148,7 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
     struct io_uring_cqe *cqe;
     int got_comp = 0;
     while (bytes_to_write) {
+      int ret;
       if (!got_comp) {
         ret = io_uring_wait_cqe(ring, &cqe);
         got_comp = 1;
@@ -163,8 +162,9 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       if (ret < 0) {
         fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
-        return 1;
+        exit(-1);
       }
+
       if (!cqe) {
         break;
       }
@@ -177,8 +177,10 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
           continue;
         }
         fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
-        return 1;
-      } else if (cqe->res != data->iov.iov_len) {
+        exit(-1);
+      }
+
+      if (cqe->res != data->iov.iov_len) {
         /* short read/write; adjust and requeue */
         data->iov.iov_base += cqe->res;
         data->iov.iov_len -= cqe->res;
@@ -204,8 +206,6 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
       io_uring_cqe_seen(ring, cqe);
     }
   }
-
-  return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -231,10 +231,10 @@ int main(int argc, char *argv[]) {
 
   off_t insize = get_file_size(infd);
 
-  int ret = copy_file(&ring, insize);
+  copy_file(&ring, insize);
 
   close(infd);
   close(outfd);
   io_uring_queue_exit(&ring);
-  return ret;
+  return 0;
 }
