@@ -215,12 +215,15 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write,
   }
 }
 
-int copy_file(struct io_uring *ring, off_t bytes_to_read) {
-  off_t bytes_to_write = bytes_to_read;
+int copy_file(struct io_uring *ring, off_t file_size) {
+  off_t bytes_to_read = file_size;
+  off_t read_offset = 0;
+
+  off_t bytes_to_write = file_size;
+
   unsigned long read_tasks = 0;
   unsigned long write_tasks = 0;
 
-  off_t read_offset = 0;
   while (bytes_to_read > 0 || bytes_to_write > 0) {
     spawn_read_tasks(ring, &read_tasks, &write_tasks, &bytes_to_read,
                      &read_offset);
