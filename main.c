@@ -99,14 +99,20 @@ static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
 }
 
 static void queue_write(struct io_uring *ring, struct io_task *data) {
+  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+  if (sqe == NULL) {
+    fprintf(stderr, "io_uring_get_sqe() failed.");
+    exit(-1);
+  }
+
   data->is_read = false;
   data->offset = data->initial_offset;
 
   data->iov.iov_base = data->bytes;
   data->iov.iov_len = data->initial_len;
 
-  queue_prepped(ring, data);
-  io_uring_submit(ring);
+  io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
+  io_uring_sqe_set_data(sqe, data);
 }
 
 int copy_file(struct io_uring *ring, off_t bytes_to_read) {
@@ -197,6 +203,7 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
        * */
       if (data->is_read) {
         queue_write(ring, data);
+        io_uring_submit(ring);
         read_tasks -= 1;
         write_tasks += 1;
       } else {
@@ -213,7 +220,7 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
 }
 
 int main(int argc, char *argv[]) {
-  if (argc < 3) {
+  if (argc != 3) {
     printf("Usage: %s <infile> <outfile>\n", argv[0]);
     exit(-1);
   }
