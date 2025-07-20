@@ -75,15 +75,14 @@ static void queue_prepped(struct io_uring *ring, struct io_task *data) {
 }
 
 static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
-  struct io_task *data = malloc(sizeof(*data) + size);
-  if (!data) {
-    return 1;
-  }
-
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
   if (!sqe) {
-    free(data);
-    return 1;
+    return -1;
+  }
+
+  struct io_task *data = malloc(sizeof(*data) + size);
+  if (!data) {
+    return -1;
   }
 
   data->is_read = true;
@@ -126,7 +125,8 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       off_t read_size = min(bytes_to_read, BLOCK_SZ);
 
-      if (queue_read(ring, read_size, read_offset)) {
+      int ret = queue_read(ring, read_size, read_offset);
+      if (ret < 0) {
         break;
       }
 
@@ -215,19 +215,19 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
 int main(int argc, char *argv[]) {
   if (argc < 3) {
     printf("Usage: %s <infile> <outfile>\n", argv[0]);
-    return 1;
+    exit(-1);
   }
 
   infd = open(argv[1], O_RDONLY);
   if (infd < 0) {
-    perror("open infile");
-    return 1;
+    fprintf(stderr, "open infile");
+    exit(-1);
   }
 
   outfd = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (outfd < 0) {
-    perror("open outfile");
-    return 1;
+    fprintf(stderr, "open outfile");
+    exit(-1);
   }
 
   struct io_uring ring;
