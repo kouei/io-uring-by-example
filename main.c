@@ -146,8 +146,8 @@ void spawn_read_tasks(struct io_uring *ring, unsigned long *read_tasks,
   }
 }
 
-void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write,
-                       unsigned long *read_tasks, unsigned long *write_tasks) {
+void spawn_write_tasks(struct io_uring *ring, unsigned long *read_tasks,
+                       unsigned long *write_tasks, off_t *bytes_to_write) {
   /* Queue is full at this point. Let's find at least one completion */
   bool already_found_completed_task = false;
   while (*bytes_to_write > 0) {
@@ -227,7 +227,7 @@ int copy_file(struct io_uring *ring, off_t file_size) {
   while (bytes_to_read > 0 || bytes_to_write > 0) {
     spawn_read_tasks(ring, &read_tasks, &write_tasks, &bytes_to_read,
                      &read_offset);
-    spawn_write_tasks(ring, &bytes_to_write, &read_tasks, &write_tasks);
+    spawn_write_tasks(ring, &read_tasks, &write_tasks, &bytes_to_write);
   }
 
   return 0;
