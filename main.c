@@ -171,6 +171,7 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
       struct io_task *data = io_uring_cqe_get_data(cqe);
       if (cqe->res == -EAGAIN) { // EAGAIN means retry.
         queue_prepped(ring, data);
+        /* Notify kernel that a CQE has been consumed successfully. */
         io_uring_cqe_seen(ring, cqe);
         continue;
       }
@@ -185,6 +186,7 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
         data->iov.iov_base += cqe->res;
         data->iov.iov_len -= cqe->res;
         queue_prepped(ring, data);
+        /* Notify kernel that a CQE has been consumed successfully. */
         io_uring_cqe_seen(ring, cqe);
         continue;
       }
