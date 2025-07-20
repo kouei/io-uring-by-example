@@ -20,8 +20,9 @@ enum io_type { READ, WRITE };
 struct io_data {
   enum io_type type;
   off_t initial_offset;
+  off_t initial_size;
   off_t offset;
-  size_t initial_len;
+  size_t size;
   struct iovec iov;
   char bytes[0]; /* Flexible Array. Real Data Payload */
 };
@@ -97,8 +98,9 @@ static int prepare_read_sqe(struct io_uring *ring, struct io_data *data,
 
   data->type = READ;
   data->initial_offset = offset;
+  data->initial_size = size;
   data->offset = offset;
-  data->initial_len = size;
+  data->size = size;
 
   data->iov.iov_base = data->bytes;
   data->iov.iov_len = size;
@@ -117,9 +119,10 @@ static void prepare_write_sqe(struct io_uring *ring, struct io_data *data) {
 
   data->type = WRITE;
   data->offset = data->initial_offset;
+  data->size = data->initial_size;
 
   data->iov.iov_base = data->bytes;
-  data->iov.iov_len = data->initial_len;
+  data->iov.iov_len = data->size;
 
   io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
   io_uring_sqe_set_data(sqe, data);
@@ -204,6 +207,8 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       if (cqe->res != data->iov.iov_len) {
         /* short read/write; adjust and requeue */
+        data->offset += cqe->res;
+        data->size -= cqe->res;
         data->iov.iov_base += cqe->res;
         data->iov.iov_len -= cqe->res;
         queue_prepped(ring, data);
@@ -222,7 +227,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
         io_uring_submit(ring);
         write_tasks += 1;
       } else { // A write task has completed
-        bytes_to_write -= data->initial_len;
+        bytes_to_write -= data->size;
         deallocate_io_data(data);
         write_tasks -= 1;
       }
