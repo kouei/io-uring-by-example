@@ -88,8 +88,8 @@ struct io_data *allocate_io_data(enum io_type type, off_t size) {
 
 void deallocate_io_data(struct io_data *data) { free(data); }
 
-static int queue_read(struct io_uring *ring, struct io_data *data, off_t size,
-                      off_t offset) {
+static int prepare_read_sqe(struct io_uring *ring, struct io_data *data,
+                            off_t size, off_t offset) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
   if (!sqe) {
     return 1;
@@ -108,7 +108,7 @@ static int queue_read(struct io_uring *ring, struct io_data *data, off_t size,
   return 0;
 }
 
-static void queue_write(struct io_uring *ring, struct io_data *data) {
+static void prepare_write_sqe(struct io_uring *ring, struct io_data *data) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
   if (!sqe) {
     fprintf(stderr, "queue_prepped() failed. io_uring_get_sqe() failed.");
@@ -142,7 +142,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
       off_t read_size = min(bytes_to_read, BLOCK_SZ);
       struct io_data *data = allocate_io_data(READ, read_size);
 
-      if (queue_read(ring, data, read_size, read_offset)) {
+      if (prepare_read_sqe(ring, data, read_size, read_offset)) {
         deallocate_io_data(data);
         break;
       }
@@ -213,7 +213,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       if (data->type == READ) { // A read task has completed
         read_tasks -= 1;
-        queue_write(ring, data);
+        prepare_write_sqe(ring, data);
         io_uring_submit(ring);
         write_tasks += 1;
       } else { // A write task has completed
