@@ -152,7 +152,7 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
         break;
       }
 
-      // Retry the same task
+      // Requeue the same task
       prepare_sqe(sqe, data);
       io_uring_cqe_seen(ring, cqe);
       is_any_new_task = true;
@@ -164,7 +164,7 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
       exit(-1);
     }
 
-    /* short read/write; adjust offset and size, then requeue the task */
+    /* short read/write; update offset and size, then requeue the task */
     if (cqe->res != data->iov.iov_len) {
       struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
       if (sqe == NULL) { // SQ is full
@@ -176,6 +176,7 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
       data->iov.iov_base += cqe->res;
       data->iov.iov_len -= cqe->res;
 
+      // Requeue the updated task
       prepare_sqe(sqe, data);
       io_uring_cqe_seen(ring, cqe);
       is_any_new_task = true;
