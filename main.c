@@ -135,6 +135,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
      * That means we have to fetch some CQE before we can start a write task.
      * */
     struct io_uring_cqe *cqe;
+    bool is_any_new_write_task = false;
     bool is_any_completed_task = false;
     while (bytes_to_write > 0) {
       int ret;
@@ -160,19 +161,21 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       struct io_data *data = io_uring_cqe_get_data(cqe);
       if (cqe->res < 0) {
-        if (cqe->res == -EAGAIN) {
-          struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-          if (!sqe) { // SQ is full
-            fprintf(stderr, "SQ is full.");
-            exit(-1);
-          }
-
-          prepare_sqe(sqe, data);
-          io_uring_cqe_seen(ring, cqe);
-          continue;
+        if (cqe->res != -EAGAIN) {
+          fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
+          exit(-1);
         }
-        fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
-        exit(-1);
+
+        // Retry the same task
+        struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+        if (!sqe) { // SQ is full
+          fprintf(stderr, "SQ is full.");
+          exit(-1);
+        }
+
+        prepare_sqe(sqe, data);
+        io_uring_cqe_seen(ring, cqe);
+        continue;
       }
 
       /* short read/write; adjust and requeue */
@@ -213,7 +216,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
         data->iov.iov_base = data->bytes;
         data->iov.iov_len = data->size;
         prepare_sqe(sqe, data);
-        io_uring_submit(ring);
+        is_any_new_write_task = true;
         write_tasks += 1;
       } else { // A write task has completed
         bytes_to_write -= data->size;
@@ -223,6 +226,14 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       // Notify the kernel that a CQE has been consumed successfully.
       io_uring_cqe_seen(ring, cqe);
+    }
+
+    if (is_any_new_write_task) {
+      int ret = io_uring_submit(ring); // Submit new write tasks to SQ
+      if (ret < 0) {
+        fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
+        exit(-1);
+      }
     }
   }
 }
