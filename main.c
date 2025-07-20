@@ -73,12 +73,7 @@ struct io_data *allocate_io_data(enum io_type type, off_t size) {
 
 void deallocate_io_data(struct io_data *data) { free(data); }
 
-static int prepare_sqe(struct io_uring *ring, struct io_data *data) {
-  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-  if (!sqe) {
-    return 1;
-  }
-
+static void prepare_sqe(struct io_uring_sqe *sqe, struct io_data *data) {
   if (data->type == READ) {
     io_uring_prep_readv(sqe, infd, &data->iov, 1, data->offset);
   } else {
@@ -86,7 +81,6 @@ static int prepare_sqe(struct io_uring *ring, struct io_data *data) {
   }
 
   io_uring_sqe_set_data(sqe, data);
-  return 0;
 }
 
 void copy_file(struct io_uring *ring, off_t bytes_to_read) {
@@ -103,6 +97,11 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
         break;
       }
 
+      struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+      if (!sqe) { // SQ is full
+        break;
+      }
+
       off_t read_size = min(bytes_to_read, BLOCK_SZ);
 
       struct io_data *data = allocate_io_data(READ, read_size);
@@ -113,11 +112,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
       data->size = read_size;
       data->iov.iov_base = data->bytes;
       data->iov.iov_len = read_size;
-
-      if (prepare_sqe(ring, data)) {
-        deallocate_io_data(data);
-        break;
-      }
+      prepare_sqe(sqe, data);
 
       bytes_to_read -= read_size;
       read_offset += read_size;
@@ -166,11 +161,13 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
       struct io_data *data = io_uring_cqe_get_data(cqe);
       if (cqe->res < 0) {
         if (cqe->res == -EAGAIN) {
-          if (prepare_sqe(ring, data)) {
-            fprintf(stderr,
-                    "Retry prepare_sqe() failed when handling EAGAIN error.");
+          struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+          if (!sqe) { // SQ is full
+            fprintf(stderr, "SQ is full.");
             exit(-1);
           }
+
+          prepare_sqe(sqe, data);
           io_uring_cqe_seen(ring, cqe);
           continue;
         }
@@ -178,17 +175,20 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
         exit(-1);
       }
 
+      /* short read/write; adjust and requeue */
       if (cqe->res != data->iov.iov_len) {
-        /* short read/write; adjust and requeue */
+        struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+        if (!sqe) { // SQ is full
+          fprintf(stderr, "SQ is full.");
+          exit(-1);
+        }
+
         data->offset += cqe->res;
         data->size -= cqe->res;
         data->iov.iov_base += cqe->res;
         data->iov.iov_len -= cqe->res;
-        if (prepare_sqe(ring, data)) {
-          fprintf(stderr,
-                  "Retry prepare_sqe() failed when handling short read/write.");
-          exit(-1);
-        }
+
+        prepare_sqe(sqe, data);
         io_uring_cqe_seen(ring, cqe);
         continue;
       }
@@ -199,6 +199,12 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
        * */
 
       if (data->type == READ) { // A read task has completed
+        struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+        if (!sqe) { // SQ is full
+          fprintf(stderr, "SQ is full.");
+          exit(-1);
+        }
+
         read_tasks -= 1;
 
         data->type = WRITE;
@@ -206,11 +212,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
         data->size = data->initial_size;
         data->iov.iov_base = data->bytes;
         data->iov.iov_len = data->size;
-        if (prepare_sqe(ring, data)) {
-          fprintf(stderr, "prepare_sqe() failed when preparing write task.");
-          exit(-1);
-        }
-
+        prepare_sqe(sqe, data);
         io_uring_submit(ring);
         write_tasks += 1;
       } else { // A write task has completed
