@@ -17,7 +17,7 @@ static int infd, outfd;
 
 enum io_type { READ, WRITE };
 
-struct io_data {
+struct io_task {
   enum io_type type;
   off_t initial_offset;
   off_t initial_size;
@@ -61,26 +61,26 @@ static off_t get_file_size(int fd) {
   exit(-1);
 }
 
-struct io_data *allocate_io_data(enum io_type type, off_t size) {
-  struct io_data *data = malloc(sizeof(*data) + size);
-  if (data == NULL) {
-    fprintf(stderr, "allocate_io_data() failed.");
+struct io_task *allocate_io_task(enum io_type type, off_t size) {
+  struct io_task *task = malloc(sizeof(*task) + size);
+  if (task == NULL) {
+    fprintf(stderr, "allocate_io_task() failed.");
     exit(-1);
   }
 
-  return data;
+  return task;
 }
 
-void deallocate_io_data(struct io_data *data) { free(data); }
+void deallocate_io_task(struct io_task *task) { free(task); }
 
-static void prepare_sqe(struct io_uring_sqe *sqe, struct io_data *data) {
-  if (data->type == READ) {
-    io_uring_prep_readv(sqe, infd, &data->iov, 1, data->offset);
+static void prepare_sqe(struct io_uring_sqe *sqe, struct io_task *task) {
+  if (task->type == READ) {
+    io_uring_prep_readv(sqe, infd, &task->iov, 1, task->offset);
   } else {
-    io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
+    io_uring_prep_writev(sqe, outfd, &task->iov, 1, task->offset);
   }
 
-  io_uring_sqe_set_data(sqe, data);
+  io_uring_sqe_set_data(sqe, task);
 }
 
 void spawn_read_tasks(struct io_uring *ring, off_t *bytes_to_read,
@@ -95,15 +95,15 @@ void spawn_read_tasks(struct io_uring *ring, off_t *bytes_to_read,
 
     off_t read_size = min(*bytes_to_read, BLOCK_SZ);
 
-    struct io_data *data = allocate_io_data(READ, read_size);
-    data->type = READ;
-    data->initial_offset = *read_offset;
-    data->initial_size = read_size;
-    data->offset = data->initial_offset;
-    data->size = data->initial_size;
-    data->iov.iov_base = data->bytes;
-    data->iov.iov_len = data->initial_size;
-    prepare_sqe(sqe, data);
+    struct io_task *task = allocate_io_task(READ, read_size);
+    task->type = READ;
+    task->initial_offset = *read_offset;
+    task->initial_size = read_size;
+    task->offset = task->initial_offset;
+    task->size = task->initial_size;
+    task->iov.iov_base = task->bytes;
+    task->iov.iov_len = task->initial_size;
+    prepare_sqe(sqe, task);
 
     *bytes_to_read -= read_size;
     *read_offset += read_size;
@@ -143,7 +143,7 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
       exit(-1);
     }
 
-    struct io_data *data = io_uring_cqe_get_data(cqe);
+    struct io_task *task = io_uring_cqe_get_data(cqe);
 
     if (cqe->res == -EAGAIN) { // EAGAIN means try again.
       struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
@@ -152,7 +152,7 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
       }
 
       // Requeue the same task
-      prepare_sqe(sqe, data);
+      prepare_sqe(sqe, task);
       io_uring_cqe_seen(ring, cqe);
       is_any_new_task = true;
       continue;
@@ -164,19 +164,19 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
     }
 
     /* short read/write; update offset and size, then requeue the task */
-    if (cqe->res != data->iov.iov_len) {
+    if (cqe->res != task->iov.iov_len) {
       struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
       if (sqe == NULL) { // SQ is full
         break;
       }
 
-      data->offset += cqe->res;
-      data->size -= cqe->res;
-      data->iov.iov_base += cqe->res;
-      data->iov.iov_len -= cqe->res;
+      task->offset += cqe->res;
+      task->size -= cqe->res;
+      task->iov.iov_base += cqe->res;
+      task->iov.iov_len -= cqe->res;
 
       // Requeue the updated task
-      prepare_sqe(sqe, data);
+      prepare_sqe(sqe, task);
       io_uring_cqe_seen(ring, cqe);
       is_any_new_task = true;
       continue;
@@ -186,22 +186,22 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
      * All done. If write, nothing else to do. If read,
      * queue up corresponding write.
      * */
-    if (data->type == READ) { // A read task has completed
+    if (task->type == READ) { // A read task has completed
       struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
       if (sqe == NULL) { // SQ is full
         break;
       }
 
-      data->type = WRITE;
-      data->offset = data->initial_offset;
-      data->size = data->initial_size;
-      data->iov.iov_base = data->bytes;
-      data->iov.iov_len = data->size;
-      prepare_sqe(sqe, data);
+      task->type = WRITE;
+      task->offset = task->initial_offset;
+      task->size = task->initial_size;
+      task->iov.iov_base = task->bytes;
+      task->iov.iov_len = task->size;
+      prepare_sqe(sqe, task);
       is_any_new_task = true;
     } else { // A write task has completed
-      *bytes_to_write -= data->initial_size;
-      deallocate_io_data(data);
+      *bytes_to_write -= task->initial_size;
+      deallocate_io_task(task);
     }
 
     // Notify the kernel that a CQE has been consumed successfully.
