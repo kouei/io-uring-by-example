@@ -110,12 +110,14 @@ void spawn_read_tasks(struct io_uring *ring, off_t *bytes_to_read,
     is_any_new_task = true;
   }
 
-  if (is_any_new_task) {
-    int ret = io_uring_submit(ring); // Submit new read tasks to SQ
-    if (ret < 0) {
-      fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
-      exit(-1);
-    }
+  if (!is_any_new_task) {
+    return;
+  }
+
+  int ret = io_uring_submit(ring); // Submit new read tasks to SQ
+  if (ret < 0) {
+    fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
+    exit(-1);
   }
 }
 
@@ -133,7 +135,7 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
     if (ret < 0) {
       if (ret == -EAGAIN) { // EAGAIN means try again. Which means currently
                             // there is no CQE available.
-        sleep(1);
+        usleep(50 * 1000); // Sleep 50 ms
         break;
       } else {
         fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
@@ -204,12 +206,14 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
     io_uring_cqe_seen(ring, cqe);
   }
 
-  if (is_any_new_task) {
-    int ret = io_uring_submit(ring); // Submit new tasks to SQ
-    if (ret < 0) {
-      fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
-      exit(-1);
-    }
+  if (!is_any_new_task) {
+    return;
+  }
+
+  int ret = io_uring_submit(ring); // Submit new tasks to SQ
+  if (ret < 0) {
+    fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
+    exit(-1);
   }
 }
 
