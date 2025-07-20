@@ -116,27 +116,26 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
   unsigned long write_tasks = 0;
 
   off_t read_offset = 0;
-  while (bytes_to_read || bytes_to_write) {
+  while (bytes_to_read > 0 || bytes_to_write > 0) {
     /* Queue up as many reads as we can */
-    bool is_queue_full = false;
-    while (bytes_to_read) {
+    bool is_any_new_read_task = false;
+    while (bytes_to_read > 0) {
       if (read_tasks + write_tasks >= QUEUE_DEPTH) {
-        is_queue_full = true;
         break;
       }
 
       off_t read_size = min(bytes_to_read, BLOCK_SZ);
       if (queue_read(ring, read_size, read_offset)) {
-        is_queue_full = true;
         break;
       }
 
       bytes_to_read -= read_size;
       read_offset += read_size;
       read_tasks += 1;
+      is_any_new_read_task = true;
     }
 
-    if (!is_queue_full) {
+    if (is_any_new_read_task) {
       int ret = io_uring_submit(ring);
       if (ret < 0) {
         fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
@@ -204,9 +203,8 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
         write_tasks -= 1;
       }
 
-      io_uring_cqe_seen(
-          ring,
-          cqe); // Notify the kernel that a CQE has been consumed successfully.
+      // Notify the kernel that a CQE has been consumed successfully.
+      io_uring_cqe_seen(ring, cqe);
     }
   }
 }
