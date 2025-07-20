@@ -22,16 +22,12 @@ struct io_data {
   struct iovec iov;
 };
 
-static int setup_context(unsigned entries, struct io_uring *ring) {
-  int ret;
-
-  ret = io_uring_queue_init(entries, ring, 0);
+static void setup_context(unsigned entries, struct io_uring *ring) {
+  int ret = io_uring_queue_init(entries, ring, 0);
   if (ret < 0) {
     fprintf(stderr, "queue_init: %s\n", strerror(-ret));
-    return -1;
+    exit(-1);
   }
-
-  return 0;
 }
 
 static off_t get_file_size(int fd) {
@@ -230,8 +226,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  if (setup_context(QUEUE_DEPTH, &ring))
-    return 1;
+  setup_context(QUEUE_DEPTH, &ring);
 
   insize = get_file_size(infd);
 
