@@ -83,6 +83,42 @@ static void prepare_sqe(struct io_uring_sqe *sqe, struct io_data *data) {
   io_uring_sqe_set_data(sqe, data);
 }
 
+void spawn_read_tasks(struct io_uring *ring, off_t *bytes_to_read,
+                      off_t *read_offset) {
+  /* Queue up as many reads as we can */
+  bool is_any_new_read_task = false;
+  while (*bytes_to_read > 0) {
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    if (!sqe) { // SQ is full
+      break;
+    }
+
+    off_t read_size = min(*bytes_to_read, BLOCK_SZ);
+
+    struct io_data *data = allocate_io_data(READ, read_size);
+    data->type = READ;
+    data->initial_offset = *read_offset;
+    data->initial_size = read_size;
+    data->offset = data->initial_offset;
+    data->size = data->initial_size;
+    data->iov.iov_base = data->bytes;
+    data->iov.iov_len = data->initial_size;
+    prepare_sqe(sqe, data);
+
+    *bytes_to_read -= read_size;
+    *read_offset += read_size;
+    is_any_new_read_task = true;
+  }
+
+  if (is_any_new_read_task) {
+    int ret = io_uring_submit(ring); // Submit new read tasks to SQ
+    if (ret < 0) {
+      fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
+      exit(-1);
+    }
+  }
+}
+
 void copy_file(struct io_uring *ring, off_t bytes_to_read) {
   off_t bytes_to_write = bytes_to_read;
   unsigned long read_tasks = 0;
@@ -90,43 +126,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
   off_t read_offset = 0;
   while (bytes_to_read > 0 || bytes_to_write > 0) {
-    /* Queue up as many reads as we can */
-    bool is_any_new_read_task = false;
-    while (bytes_to_read > 0) {
-      if (read_tasks + write_tasks >= QUEUE_DEPTH) {
-        break;
-      }
-
-      struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-      if (!sqe) { // SQ is full
-        break;
-      }
-
-      off_t read_size = min(bytes_to_read, BLOCK_SZ);
-
-      struct io_data *data = allocate_io_data(READ, read_size);
-      data->type = READ;
-      data->initial_offset = read_offset;
-      data->initial_size = read_size;
-      data->offset = read_offset;
-      data->size = read_size;
-      data->iov.iov_base = data->bytes;
-      data->iov.iov_len = read_size;
-      prepare_sqe(sqe, data);
-
-      bytes_to_read -= read_size;
-      read_offset += read_size;
-      read_tasks += 1;
-      is_any_new_read_task = true;
-    }
-
-    if (is_any_new_read_task) {
-      int ret = io_uring_submit(ring); // Submit new read tasks to SQ
-      if (ret < 0) {
-        fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
-        exit(-1);
-      }
-    }
+    spawn_read_tasks(ring, &bytes_to_read, &read_offset);
 
     /*
      * Now we have submitted read tasks, let's deal with write tasks.
