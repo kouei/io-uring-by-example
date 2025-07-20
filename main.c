@@ -63,7 +63,7 @@ static off_t get_file_size(int fd) {
 
 struct io_data *allocate_io_data(enum io_type type, off_t size) {
   struct io_data *data = malloc(sizeof(*data) + size);
-  if (!data) {
+  if (data == NULL) {
     fprintf(stderr, "allocate_io_data() failed.");
     exit(-1);
   }
@@ -89,7 +89,7 @@ void spawn_read_tasks(struct io_uring *ring, off_t *bytes_to_read,
   bool is_any_new_task = false;
   while (*bytes_to_read > 0) {
     struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-    if (!sqe) { // SQ is full
+    if (sqe == NULL) { // SQ is full
       break;
     }
 
@@ -131,27 +131,24 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
   bool is_any_new_task = false;
   while (*bytes_to_write > 0) {
     struct io_uring_cqe *cqe;
+
     int ret = io_uring_peek_cqe(ring, &cqe);
+    if (ret == -EAGAIN) { // EAGAIN means try again. Which means currently
+                          // there is no CQE available.
+      usleep(50 * 1000);  // Sleep 50 ms
+      break;
+    }
+
     if (ret < 0) {
-      if (ret == -EAGAIN) { // EAGAIN means try again. Which means currently
-                            // there is no CQE available.
-        usleep(50 * 1000);  // Sleep 50 ms
-        break;
-      } else {
-        fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
-        exit(-1);
-      }
+      fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
+      exit(-1);
     }
 
     struct io_data *data = io_uring_cqe_get_data(cqe);
-    if (cqe->res < 0) {
-      if (cqe->res != -EAGAIN) {
-        fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
-        exit(-1);
-      }
 
+    if (cqe->res == -EAGAIN) { // EAGAIN means try again.
       struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-      if (!sqe) { // SQ is full
+      if (sqe == NULL) { // SQ is full
         break;
       }
 
@@ -162,10 +159,15 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
       continue;
     }
 
+    if (cqe->res < 0) {
+      fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
+      exit(-1);
+    }
+
     /* short read/write; adjust offset and size, then requeue the task */
     if (cqe->res != data->iov.iov_len) {
       struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-      if (!sqe) { // SQ is full
+      if (sqe == NULL) { // SQ is full
         break;
       }
 
@@ -186,7 +188,7 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
      * */
     if (data->type == READ) { // A read task has completed
       struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-      if (!sqe) { // SQ is full
+      if (sqe == NULL) { // SQ is full
         break;
       }
 
