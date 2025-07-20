@@ -194,16 +194,19 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
        * queue up corresponding write.
        * */
 
-      if (data->type == READ) {
-        queue_write(ring, data);
+      if (data->type == READ) { // A read task has completed
         read_tasks -= 1;
+        queue_write(ring, data);
         write_tasks += 1;
-      } else {
+      } else { // A write task has completed
         bytes_to_write -= data->initial_len;
         free(data);
         write_tasks -= 1;
       }
-      io_uring_cqe_seen(ring, cqe);
+
+      io_uring_cqe_seen(
+          ring,
+          cqe); // Notify the kernel that a CQE has been consumed successfully.
     }
   }
 }
