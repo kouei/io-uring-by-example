@@ -34,24 +34,30 @@ static int setup_context(unsigned entries, struct io_uring *ring) {
   return 0;
 }
 
-static int get_file_size(int fd, off_t *size) {
+static off_t get_file_size(int fd) {
   struct stat st;
 
-  if (fstat(fd, &st) < 0)
-    return -1;
-  if (S_ISREG(st.st_mode)) {
-    *size = st.st_size;
-    return 0;
-  } else if (S_ISBLK(st.st_mode)) {
-    unsigned long long bytes;
-
-    if (ioctl(fd, BLKGETSIZE64, &bytes) != 0)
-      return -1;
-
-    *size = bytes;
-    return 0;
+  if (fstat(fd, &st) < 0) {
+    fprintf(stderr, "fstat() failed.");
+    exit(-1);
   }
-  return -1;
+
+  if (S_ISREG(st.st_mode)) {
+    return st.st_size;
+  }
+
+  if (S_ISBLK(st.st_mode)) {
+    off_t bytes;
+    if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
+      fprintf(stderr, "ioctl() failed.");
+      exit(-1);
+    }
+
+    return bytes;
+  }
+
+  fprintf(stderr, "Unsupported st_mode = %u", st.st_mode);
+  exit(-1);
 }
 
 static void queue_prepped(struct io_uring *ring, struct io_data *data) {
@@ -227,8 +233,7 @@ int main(int argc, char *argv[]) {
   if (setup_context(QUEUE_DEPTH, &ring))
     return 1;
 
-  if (get_file_size(infd, &insize))
-    return 1;
+  insize = get_file_size(infd);
 
   ret = copy_file(&ring, insize);
 
