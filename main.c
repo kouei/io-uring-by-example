@@ -1,3 +1,5 @@
+#include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <liburing.h>
 #include <stdio.h>
@@ -5,162 +7,245 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
-#define QUEUE_DEPTH 1
-#define BLOCK_SZ 1024
-
+#define QUEUE_DEPTH 2
+#define BLOCK_SZ (16 * 1024)
 #define min(x, y) ((x) < (y) ? (x) : (y))
-#define div_round_up(x, y) (((x) + (y) - 1) / (y))
 
-struct file_info {
-  off_t file_sz;
-  struct iovec iovecs[0]; /* Flexible Array. Referred by readv/writev */
+static int infd, outfd;
+
+struct io_data {
+  int read;
+  off_t first_offset, offset;
+  size_t first_len;
+  struct iovec iov;
+  char bytes[0]; /* Flexible Array. Real data payload. */
 };
 
-/*
- * Returns the size of the file whose open file descriptor is passed in.
- * Properly handles regular file and block devices as well. Pretty.
- * */
+static void setup_context(unsigned entries, struct io_uring *ring) {
+  int ret;
 
-off_t get_file_size(int fd) {
+  ret = io_uring_queue_init(entries, ring, 0);
+  if (ret < 0) {
+    fprintf(stderr, "queue_init: %s\n", strerror(-ret));
+    exit(-1);
+  }
+}
+
+static off_t get_file_size(int fd) {
   struct stat st;
-
   if (fstat(fd, &st) < 0) {
-    fprintf(stderr, "fstat");
+    fprintf(stderr, "get_file_size() failed.\n");
     exit(-1);
   }
 
-  // Is regular file
   if (S_ISREG(st.st_mode)) {
     return st.st_size;
   }
 
-  // Is block device
   if (S_ISBLK(st.st_mode)) {
-    unsigned long long bytes;
+    off_t bytes;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
-      fprintf(stderr, "ioctl");
+      fprintf(stderr, "ioctl() failed");
       exit(-1);
     }
 
     return bytes;
   }
 
+  fprintf(stderr, "get_file_size() failed. st_mode = %u\n", st.st_mode);
   exit(-1);
 }
 
-void *aligned_malloc(size_t alignment, size_t size) {
-  void *buf = NULL;
-
-  if (posix_memalign(&buf, alignment, size)) {
-    fprintf(stderr, "posix_memalign");
-    exit(-1);
-  }
-
-  return buf;
-}
-
-/*
- * Output a string of characters of len length to stdout.
- * We use buffered output here to be efficient,
- * since we need to output character-by-character.
- * */
-void output_to_console(char *buf, int len) {
-  while (len--) {
-    fputc(*buf++, stdout);
-  }
-}
-
-/*
- * Wait for a completion to be available, fetch the data from
- * the readv operation and print it to the console.
- * */
-
-void get_completion_and_print(struct io_uring *ring) {
-  struct io_uring_cqe *cqe;
-  int ret = io_uring_wait_cqe(ring, &cqe);
-  if (ret < 0) {
-    fprintf(stderr, "io_uring_wait_cqe");
-    exit(-1);
-  }
-
-  if (cqe->res < 0) {
-    fprintf(stderr, "Async readv failed.\n");
-    exit(-1);
-  }
-
-  // Get the "user_data" defined in struct io_uring_cqe
-  struct file_info *fi = io_uring_cqe_get_data(cqe);
-
-  off_t blocks = div_round_up(fi->file_sz, BLOCK_SZ);
-  for (int i = 0; i < blocks; i++) {
-    output_to_console(fi->iovecs[i].iov_base, fi->iovecs[i].iov_len);
-  }
-
-  // Notify the kernel that this CQE has been consumed
-  io_uring_cqe_seen(ring, cqe);
-}
-
-/*
- * Submit the readv request via liburing
- * */
-
-void submit_read_request(char *file_path, struct io_uring *ring) {
-  int file_fd = open(file_path, O_RDONLY);
-  if (file_fd < 0) {
-    fprintf(stderr, "open");
-    exit(-1);
-  }
-
-  off_t file_sz = get_file_size(file_fd);
-  int blocks = div_round_up(file_sz, BLOCK_SZ);
-  struct file_info *fi = malloc(sizeof(*fi) + sizeof(fi->iovecs[0]) * blocks);
-  if (!fi) {
-    fprintf(stderr, "Unable to allocate memory\n");
-    exit(-1);
-  }
-  fi->file_sz = file_sz;
-
-  off_t bytes_remaining = file_sz;
-  for (off_t i = 0; i < blocks; ++i) {
-    off_t bytes_to_read = min(bytes_remaining, BLOCK_SZ);
-
-    fi->iovecs[i].iov_len = bytes_to_read;
-    fi->iovecs[i].iov_base = aligned_malloc(BLOCK_SZ, BLOCK_SZ);
-
-    bytes_remaining -= bytes_to_read;
-  }
-
-  /* Get an SQE */
+static void queue_prepped(struct io_uring *ring, struct io_data *data) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+  if (!sqe) {
+    fprintf(stderr, "io_uring_get_sqe() failed");
+    exit(-1);
+  }
 
-  /* Setup a readv operation */
-  io_uring_prep_readv(sqe, file_fd, fi->iovecs, blocks, 0);
+  if (data->read) {
+    io_uring_prep_readv(sqe, infd, &data->iov, 1, data->offset);
+  } else {
+    io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
+  }
 
-  /* Set user data */
-  io_uring_sqe_set_data(sqe, fi);
+  io_uring_sqe_set_data(sqe, data);
+}
 
-  /* Finally, submit the request */
+static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
+  struct io_data *data = malloc(sizeof(*data) + size);
+  if (!data) {
+    fprintf(stderr, "queue_read() failed. malloc failed.");
+    exit(-1);
+  }
+
+  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+  if (!sqe) {
+    free(data);
+    return 1;
+  }
+
+  data->read = 1;
+  data->offset = data->first_offset = offset;
+
+  data->iov.iov_base = data->bytes;
+  data->iov.iov_len = size;
+  data->first_len = size;
+
+  io_uring_prep_readv(sqe, infd, &data->iov, 1, offset);
+  io_uring_sqe_set_data(sqe, data);
+  return 0;
+}
+
+static void queue_write(struct io_uring *ring, struct io_data *data) {
+  data->read = 0;
+  data->offset = data->first_offset;
+
+  data->iov.iov_base = data->bytes;
+  data->iov.iov_len = data->first_len;
+
+  queue_prepped(ring, data);
   io_uring_submit(ring);
 }
 
-int main(int argc, char *argv[]) {
-  if (argc < 2) {
-    fprintf(stderr, "Usage: %s [file name] <[file name] ...>\n", argv[0]);
-    exit(-1);
+int copy_file(struct io_uring *ring, off_t insize) {
+  int ret;
+
+  off_t write_left = insize;
+  off_t offset = 0;
+  unsigned long reads = 0;
+  unsigned long writes = 0;
+
+  while (insize || write_left) {
+    /* Queue up as many reads as we can */
+    bool is_sq_full = false;
+    while (insize) {
+      if (reads + writes >= QUEUE_DEPTH) {
+        is_sq_full = true;
+        break;
+      }
+
+      off_t this_size = min(insize, BLOCK_SZ);
+
+      int queue_read_failed = queue_read(ring, this_size, offset);
+      if (queue_read_failed) {
+        is_sq_full = true;
+        break;
+      }
+
+      insize -= this_size;
+      offset += this_size;
+      reads++;
+    }
+
+    /* Queue is not full. Submit new I/O requests */
+    if (!is_sq_full) {
+      ret = io_uring_submit(ring);
+      if (ret < 0) {
+        fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
+        exit(-1);
+      }
+    }
+
+    /* Queue is full at this point. Let's find at least one completion */
+    int got_comp = 0;
+    while (write_left) {
+      struct io_uring_cqe *cqe;
+
+      if (!got_comp) {
+        ret = io_uring_wait_cqe(ring, &cqe);
+        got_comp = 1;
+      } else {
+        ret = io_uring_peek_cqe(ring, &cqe);
+        if (ret == -EAGAIN) {
+          cqe = NULL;
+          ret = 0;
+        }
+      }
+
+      if (ret < 0) {
+        fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
+        exit(-1);
+      }
+
+      if (!cqe) {
+        break;
+      }
+
+      struct io_data *data = io_uring_cqe_get_data(cqe);
+      if (cqe->res < 0) {
+        if (cqe->res == -EAGAIN) {
+          queue_prepped(ring, data);
+          io_uring_cqe_seen(ring, cqe);
+          continue;
+        }
+        fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
+        exit(-1);
+      }
+
+      if (cqe->res != data->iov.iov_len) {
+        /* short read/write; adjust and requeue */
+        data->iov.iov_base += cqe->res;
+        data->iov.iov_len -= cqe->res;
+        queue_prepped(ring, data);
+        io_uring_cqe_seen(ring, cqe);
+        continue;
+      }
+
+      /*
+       * All done. If write, nothing else to do. If read,
+       * queue up corresponding write.
+       * */
+
+      if (data->read) {
+        queue_write(ring, data);
+        write_left -= data->first_len;
+        reads--;
+        writes++;
+      } else {
+        free(data);
+        writes--;
+      }
+
+      io_uring_cqe_seen(ring, cqe);
+    }
   }
-
-  struct io_uring ring;
-  /* Initialize io_uring */
-  io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
-
-  for (int i = 1; i < argc; i++) {
-    submit_read_request(argv[i], &ring);
-    get_completion_and_print(&ring);
-  }
-
-  /* Call the clean-up function. */
-  io_uring_queue_exit(&ring);
 
   return 0;
+}
+
+int main(int argc, char *argv[]) {
+  struct io_uring ring;
+  off_t insize;
+  int ret;
+
+  if (argc < 3) {
+    printf("Usage: %s <infile> <outfile>\n", argv[0]);
+    return 1;
+  }
+
+  infd = open(argv[1], O_RDONLY);
+  if (infd < 0) {
+    perror("open infile");
+    return 1;
+  }
+
+  outfd = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (outfd < 0) {
+    perror("open outfile");
+    return 1;
+  }
+
+  setup_context(QUEUE_DEPTH, &ring);
+
+  insize = get_file_size(infd);
+
+  ret = copy_file(&ring, insize);
+
+  close(infd);
+  close(outfd);
+  io_uring_queue_exit(&ring);
+  return ret;
 }
