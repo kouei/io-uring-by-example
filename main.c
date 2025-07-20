@@ -119,122 +119,106 @@ void spawn_read_tasks(struct io_uring *ring, off_t *bytes_to_read,
   }
 }
 
-void copy_file(struct io_uring *ring, off_t bytes_to_read) {
-  off_t bytes_to_write = bytes_to_read;
-  unsigned long read_tasks = 0;
-  unsigned long write_tasks = 0;
-
-  off_t read_offset = 0;
-  while (bytes_to_read > 0 || bytes_to_write > 0) {
-    spawn_read_tasks(ring, &bytes_to_read, &read_offset);
-
-    /*
-     * Now we have submitted read tasks, let's deal with write tasks.
-     * When shall we start any write task?
-     * The answer is when some previous read task has completed.
-     * That means we have to fetch some CQE before we can start a write task.
-     * */
-    struct io_uring_cqe *cqe;
-    bool is_any_new_write_task = false;
-    bool is_any_completed_task = false;
-    while (bytes_to_write > 0) {
-      int ret;
-      if (!is_any_completed_task) {
-        ret = io_uring_wait_cqe(ring, &cqe);
-        is_any_completed_task = true;
+void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
+  /*
+   * Now we have submitted read tasks, let's deal with write tasks.
+   * When shall we start any write task?
+   * The answer is when some previous read task has completed.
+   * That means we have to fetch some CQE before we can start a write task.
+   * */
+  struct io_uring_cqe *cqe;
+  bool is_any_new_task = false;
+  while (*bytes_to_write > 0) {
+    int ret = io_uring_peek_cqe(ring, &cqe);
+    if (ret < 0) {
+      if (ret == -EAGAIN) { // EAGAIN means try again. Which means currently
+                            // there is no CQE available.
+        sleep(1);
+        break;
       } else {
-        ret = io_uring_peek_cqe(ring, &cqe);
-        if (ret == -EAGAIN) { // EAGAIN means try again.
-          cqe = NULL;
-          ret = 0;
-        }
-      }
-
-      if (ret < 0) {
         fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
         exit(-1);
       }
+    }
 
-      if (!cqe) {
+    struct io_data *data = io_uring_cqe_get_data(cqe);
+    if (cqe->res < 0) {
+      if (cqe->res != -EAGAIN) {
+        fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
+        exit(-1);
+      }
+
+      struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+      if (!sqe) { // SQ is full
         break;
       }
 
-      struct io_data *data = io_uring_cqe_get_data(cqe);
-      if (cqe->res < 0) {
-        if (cqe->res != -EAGAIN) {
-          fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
-          exit(-1);
-        }
-
-        // Retry the same task
-        struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-        if (!sqe) { // SQ is full
-          fprintf(stderr, "SQ is full.");
-          exit(-1);
-        }
-
-        prepare_sqe(sqe, data);
-        io_uring_cqe_seen(ring, cqe);
-        continue;
-      }
-
-      /* short read/write; adjust and requeue */
-      if (cqe->res != data->iov.iov_len) {
-        struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-        if (!sqe) { // SQ is full
-          fprintf(stderr, "SQ is full.");
-          exit(-1);
-        }
-
-        data->offset += cqe->res;
-        data->size -= cqe->res;
-        data->iov.iov_base += cqe->res;
-        data->iov.iov_len -= cqe->res;
-
-        prepare_sqe(sqe, data);
-        io_uring_cqe_seen(ring, cqe);
-        continue;
-      }
-
-      /*
-       * All done. If write, nothing else to do. If read,
-       * queue up corresponding write.
-       * */
-
-      if (data->type == READ) { // A read task has completed
-        struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-        if (!sqe) { // SQ is full
-          fprintf(stderr, "SQ is full.");
-          exit(-1);
-        }
-
-        read_tasks -= 1;
-
-        data->type = WRITE;
-        data->offset = data->initial_offset;
-        data->size = data->initial_size;
-        data->iov.iov_base = data->bytes;
-        data->iov.iov_len = data->size;
-        prepare_sqe(sqe, data);
-        is_any_new_write_task = true;
-        write_tasks += 1;
-      } else { // A write task has completed
-        bytes_to_write -= data->size;
-        deallocate_io_data(data);
-        write_tasks -= 1;
-      }
-
-      // Notify the kernel that a CQE has been consumed successfully.
+      // Retry the same task
+      prepare_sqe(sqe, data);
       io_uring_cqe_seen(ring, cqe);
+      is_any_new_task = true;
+      continue;
     }
 
-    if (is_any_new_write_task) {
-      int ret = io_uring_submit(ring); // Submit new write tasks to SQ
-      if (ret < 0) {
-        fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
-        exit(-1);
+    /* short read/write; adjust offset and size, then requeue the task */
+    if (cqe->res != data->iov.iov_len) {
+      struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+      if (!sqe) { // SQ is full
+        break;
       }
+
+      data->offset += cqe->res;
+      data->size -= cqe->res;
+      data->iov.iov_base += cqe->res;
+      data->iov.iov_len -= cqe->res;
+
+      prepare_sqe(sqe, data);
+      io_uring_cqe_seen(ring, cqe);
+      is_any_new_task = true;
+      continue;
     }
+
+    /*
+     * All done. If write, nothing else to do. If read,
+     * queue up corresponding write.
+     * */
+    if (data->type == READ) { // A read task has completed
+      struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+      if (!sqe) { // SQ is full
+        break;
+      }
+
+      data->type = WRITE;
+      data->offset = data->initial_offset;
+      data->size = data->initial_size;
+      data->iov.iov_base = data->bytes;
+      data->iov.iov_len = data->size;
+      prepare_sqe(sqe, data);
+      is_any_new_task = true;
+    } else { // A write task has completed
+      *bytes_to_write -= data->initial_size;
+      deallocate_io_data(data);
+    }
+
+    // Notify the kernel that a CQE has been consumed successfully.
+    io_uring_cqe_seen(ring, cqe);
+  }
+
+  if (is_any_new_task) {
+    int ret = io_uring_submit(ring); // Submit new tasks to SQ
+    if (ret < 0) {
+      fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
+      exit(-1);
+    }
+  }
+}
+
+void copy_file(struct io_uring *ring, off_t bytes_to_read) {
+  off_t bytes_to_write = bytes_to_read;
+  off_t read_offset = 0;
+  while (bytes_to_read > 0 || bytes_to_write > 0) {
+    spawn_read_tasks(ring, &bytes_to_read, &read_offset);
+    spawn_write_tasks(ring, &bytes_to_write);
   }
 }
 
