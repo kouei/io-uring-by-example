@@ -115,6 +115,37 @@ static void queue_write(struct io_uring *ring, struct io_task *task) {
   io_uring_sqe_set_data(sqe, task);
 }
 
+void spawn_read_tasks(struct io_uring *ring, unsigned long *read_tasks,
+                      unsigned long *write_tasks, off_t *bytes_to_read,
+                      off_t *read_offset) {
+  /* Queue up as many reads as we can */
+  unsigned long previous_read_tasks = *read_tasks;
+  while (*bytes_to_read > 0) {
+    if (*read_tasks + *write_tasks >= QUEUE_DEPTH) {
+      break;
+    }
+
+    off_t read_size = min(*bytes_to_read, BLOCK_SZ);
+
+    int ret = queue_read(ring, read_size, *read_offset);
+    if (ret < 0) {
+      break;
+    }
+
+    *bytes_to_read -= read_size;
+    *read_offset += read_size;
+    *read_tasks += 1;
+  }
+
+  if (previous_read_tasks < *read_tasks) {
+    int ret = io_uring_submit(ring);
+    if (ret < 0) {
+      fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
+      exit(-1);
+    }
+  }
+}
+
 int copy_file(struct io_uring *ring, off_t bytes_to_read) {
   off_t bytes_to_write = bytes_to_read;
   unsigned long read_tasks = 0;
@@ -122,32 +153,8 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
   off_t read_offset = 0;
   while (bytes_to_read > 0 || bytes_to_write > 0) {
-    /* Queue up as many reads as we can */
-    int previous_read_tasks = read_tasks;
-    while (bytes_to_read > 0) {
-      if (read_tasks + write_tasks >= QUEUE_DEPTH) {
-        break;
-      }
-
-      off_t read_size = min(bytes_to_read, BLOCK_SZ);
-
-      int ret = queue_read(ring, read_size, read_offset);
-      if (ret < 0) {
-        break;
-      }
-
-      bytes_to_read -= read_size;
-      read_offset += read_size;
-      read_tasks += 1;
-    }
-
-    if (previous_read_tasks < read_tasks) {
-      int ret = io_uring_submit(ring);
-      if (ret < 0) {
-        fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
-        exit(-1);
-      }
-    }
+    spawn_read_tasks(ring, &read_tasks, &write_tasks, &bytes_to_read,
+                     &read_offset);
 
     /* Queue is full at this point. Let's find at least one completion */
     bool already_found_completed_task = false;
