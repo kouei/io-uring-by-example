@@ -58,20 +58,20 @@ static off_t get_file_size(int fd) {
   exit(-1);
 }
 
-static void requeue_task(struct io_uring *ring, struct io_task *data) {
+static void requeue_task(struct io_uring *ring, struct io_task *task) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
     exit(-1);
   }
 
-  if (data->is_read) {
-    io_uring_prep_readv(sqe, infd, &data->iov, 1, data->offset);
+  if (task->is_read) {
+    io_uring_prep_readv(sqe, infd, &task->iov, 1, task->offset);
   } else {
-    io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
+    io_uring_prep_writev(sqe, outfd, &task->iov, 1, task->offset);
   }
 
-  io_uring_sqe_set_data(sqe, data);
+  io_uring_sqe_set_data(sqe, task);
 }
 
 static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
@@ -80,39 +80,39 @@ static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
     return -1;
   }
 
-  struct io_task *data = malloc(sizeof(*data) + size);
-  if (!data) {
+  struct io_task *task = malloc(sizeof(*task) + size);
+  if (!task) {
     return -1;
   }
 
-  data->is_read = true;
-  data->initial_offset = offset;
-  data->offset = offset;
-  data->initial_len = size;
+  task->is_read = true;
+  task->initial_offset = offset;
+  task->offset = offset;
+  task->initial_len = size;
 
-  data->iov.iov_base = data->bytes;
-  data->iov.iov_len = data->initial_len;
+  task->iov.iov_base = task->bytes;
+  task->iov.iov_len = task->initial_len;
 
-  io_uring_prep_readv(sqe, infd, &data->iov, 1, offset);
-  io_uring_sqe_set_data(sqe, data);
+  io_uring_prep_readv(sqe, infd, &task->iov, 1, offset);
+  io_uring_sqe_set_data(sqe, task);
   return 0;
 }
 
-static void queue_write(struct io_uring *ring, struct io_task *data) {
+static void queue_write(struct io_uring *ring, struct io_task *task) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
     exit(-1);
   }
 
-  data->is_read = false;
-  data->offset = data->initial_offset;
+  task->is_read = false;
+  task->offset = task->initial_offset;
 
-  data->iov.iov_base = data->bytes;
-  data->iov.iov_len = data->initial_len;
+  task->iov.iov_base = task->bytes;
+  task->iov.iov_len = task->initial_len;
 
-  io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
-  io_uring_sqe_set_data(sqe, data);
+  io_uring_prep_writev(sqe, outfd, &task->iov, 1, task->offset);
+  io_uring_sqe_set_data(sqe, task);
 }
 
 int copy_file(struct io_uring *ring, off_t bytes_to_read) {
@@ -174,9 +174,9 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
         }
       }
 
-      struct io_task *data = io_uring_cqe_get_data(cqe);
+      struct io_task *task = io_uring_cqe_get_data(cqe);
       if (cqe->res == -EAGAIN) { // EAGAIN means retry.
-        requeue_task(ring, data);
+        requeue_task(ring, task);
         /* Notify kernel that a CQE has been consumed successfully. */
         io_uring_cqe_seen(ring, cqe);
         continue;
@@ -187,11 +187,11 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
         exit(-1);
       }
 
-      if (cqe->res != data->iov.iov_len) {
+      if (cqe->res != task->iov.iov_len) {
         /* short read/write; adjust and requeue */
-        data->iov.iov_base += cqe->res;
-        data->iov.iov_len -= cqe->res;
-        requeue_task(ring, data);
+        task->iov.iov_base += cqe->res;
+        task->iov.iov_len -= cqe->res;
+        requeue_task(ring, task);
         /* Notify kernel that a CQE has been consumed successfully. */
         io_uring_cqe_seen(ring, cqe);
         continue;
@@ -201,14 +201,14 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
        * All done. If write, nothing else to do. If read,
        * queue up corresponding write.
        * */
-      if (data->is_read) {
-        queue_write(ring, data);
+      if (task->is_read) {
+        queue_write(ring, task);
         io_uring_submit(ring);
         read_tasks -= 1;
         write_tasks += 1;
       } else {
-        bytes_to_write -= data->initial_len;
-        free(data);
+        bytes_to_write -= task->initial_len;
+        free(task);
         write_tasks -= 1;
       }
 
