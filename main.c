@@ -89,10 +89,10 @@ static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
   data->is_read = true;
   data->initial_offset = offset;
   data->offset = offset;
+  data->initial_len = size;
 
   data->iov.iov_base = data->bytes;
-  data->iov.iov_len = size;
-  data->initial_len = size;
+  data->iov.iov_len = data->initial_len;
 
   io_uring_prep_readv(sqe, infd, &data->iov, 1, offset);
   io_uring_sqe_set_data(sqe, data);
