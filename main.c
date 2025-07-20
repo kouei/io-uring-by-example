@@ -122,7 +122,6 @@ static void queue_write(struct io_uring *ring, struct io_data *data) {
 
   io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
   io_uring_sqe_set_data(sqe, data);
-  io_uring_submit(ring);
 }
 
 void copy_file(struct io_uring *ring, off_t bytes_to_read) {
@@ -213,6 +212,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
       if (data->type == READ) { // A read task has completed
         read_tasks -= 1;
         queue_write(ring, data);
+        io_uring_submit(ring);
         write_tasks += 1;
       } else { // A write task has completed
         bytes_to_write -= data->initial_len;
