@@ -128,14 +128,14 @@ void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write) {
    * The answer is when some previous read task has completed.
    * That means we have to fetch some CQE before we can start a write task.
    * */
-  struct io_uring_cqe *cqe;
   bool is_any_new_task = false;
   while (*bytes_to_write > 0) {
+    struct io_uring_cqe *cqe;
     int ret = io_uring_peek_cqe(ring, &cqe);
     if (ret < 0) {
       if (ret == -EAGAIN) { // EAGAIN means try again. Which means currently
                             // there is no CQE available.
-        usleep(50 * 1000); // Sleep 50 ms
+        usleep(50 * 1000);  // Sleep 50 ms
         break;
       } else {
         fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
