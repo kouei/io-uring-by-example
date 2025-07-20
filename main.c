@@ -100,13 +100,22 @@ static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
 }
 
 static void queue_write(struct io_uring *ring, struct io_data *data) {
+  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+  if (!sqe) {
+    fprintf(stderr, "queue_prepped() failed. io_uring_get_sqe() failed.");
+    exit(-1);
+  }
+
   data->type = WRITE;
   data->offset = data->initial_offset;
 
   data->iov.iov_base = data->bytes;
   data->iov.iov_len = data->initial_len;
 
-  queue_prepped(ring, data);
+  io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
+
+  io_uring_sqe_set_data(sqe, data);
+
   io_uring_submit(ring);
 }
 
@@ -146,7 +155,7 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
     /* Queue is full at this point. Let's find at least one completion */
     struct io_uring_cqe *cqe;
     bool is_any_completed_task = false;
-    while (bytes_to_write) {
+    while (bytes_to_write > 0) {
       int ret;
       if (!is_any_completed_task) {
         ret = io_uring_wait_cqe(ring, &cqe);
