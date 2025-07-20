@@ -145,12 +145,12 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
     /* Queue is full at this point. Let's find at least one completion */
     struct io_uring_cqe *cqe;
-    int got_comp = 0;
+    bool is_any_completed_task = false;
     while (bytes_to_write) {
       int ret;
-      if (!got_comp) {
+      if (!is_any_completed_task) {
         ret = io_uring_wait_cqe(ring, &cqe);
-        got_comp = 1;
+        is_any_completed_task = true;
       } else {
         ret = io_uring_peek_cqe(ring, &cqe);
         if (ret == -EAGAIN) { // EAGAIN means try again.
