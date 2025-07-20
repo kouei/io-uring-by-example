@@ -89,21 +89,11 @@ struct io_data *allocate_io_data(enum io_type type, off_t size) {
 
 void deallocate_io_data(struct io_data *data) { free(data); }
 
-static int prepare_read_sqe(struct io_uring *ring, struct io_data *data,
-                            off_t size, off_t offset) {
+static int prepare_read_sqe(struct io_uring *ring, struct io_data *data) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
   if (!sqe) {
     return 1;
   }
-
-  data->type = READ;
-  data->initial_offset = offset;
-  data->initial_size = size;
-  data->offset = offset;
-  data->size = size;
-
-  data->iov.iov_base = data->bytes;
-  data->iov.iov_len = size;
 
   io_uring_prep_readv(sqe, infd, &data->iov, 1, data->offset);
   io_uring_sqe_set_data(sqe, data);
@@ -116,13 +106,6 @@ static void prepare_write_sqe(struct io_uring *ring, struct io_data *data) {
     fprintf(stderr, "queue_prepped() failed. io_uring_get_sqe() failed.");
     exit(-1);
   }
-
-  data->type = WRITE;
-  data->offset = data->initial_offset;
-  data->size = data->initial_size;
-
-  data->iov.iov_base = data->bytes;
-  data->iov.iov_len = data->size;
 
   io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
   io_uring_sqe_set_data(sqe, data);
@@ -143,9 +126,17 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
       }
 
       off_t read_size = min(bytes_to_read, BLOCK_SZ);
-      struct io_data *data = allocate_io_data(READ, read_size);
 
-      if (prepare_read_sqe(ring, data, read_size, read_offset)) {
+      struct io_data *data = allocate_io_data(READ, read_size);
+      data->type = READ;
+      data->initial_offset = read_offset;
+      data->initial_size = read_size;
+      data->offset = read_offset;
+      data->size = read_size;
+      data->iov.iov_base = data->bytes;
+      data->iov.iov_len = read_size;
+
+      if (prepare_read_sqe(ring, data)) {
         deallocate_io_data(data);
         break;
       }
@@ -223,6 +214,13 @@ void copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       if (data->type == READ) { // A read task has completed
         read_tasks -= 1;
+
+        data->type = WRITE;
+        data->offset = data->initial_offset;
+        data->size = data->initial_size;
+        data->iov.iov_base = data->bytes;
+        data->iov.iov_len = data->size;
+
         prepare_write_sqe(ring, data);
         io_uring_submit(ring);
         write_tasks += 1;
