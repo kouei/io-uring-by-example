@@ -146,6 +146,75 @@ void spawn_read_tasks(struct io_uring *ring, unsigned long *read_tasks,
   }
 }
 
+void spawn_write_tasks(struct io_uring *ring, off_t *bytes_to_write,
+                       unsigned long *read_tasks, unsigned long *write_tasks) {
+  /* Queue is full at this point. Let's find at least one completion */
+  bool already_found_completed_task = false;
+  while (*bytes_to_write > 0) {
+    struct io_uring_cqe *cqe;
+    if (!already_found_completed_task) {
+      int ret = io_uring_wait_cqe(ring, &cqe);
+      if (ret < 0) {
+        fprintf(stderr, "io_uring_wait_cqe: %s\n", strerror(-ret));
+        exit(-1);
+      }
+
+      already_found_completed_task = true;
+    } else {
+      int ret = io_uring_peek_cqe(ring, &cqe);
+      if (ret == -EAGAIN) { // EAGAIN means retry. It also means currently CQ
+                            // is empty.
+        break;
+      }
+
+      if (ret < 0) {
+        fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
+        exit(-1);
+      }
+    }
+
+    struct io_task *task = io_uring_cqe_get_data(cqe);
+    if (cqe->res == -EAGAIN) { // EAGAIN means retry.
+      requeue_task(ring, task);
+      /* Notify kernel that a CQE has been consumed successfully. */
+      io_uring_cqe_seen(ring, cqe);
+      continue;
+    }
+
+    if (cqe->res < 0) {
+      fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
+      exit(-1);
+    }
+
+    if (cqe->res != task->iov.iov_len) {
+      /* short read/write; adjust and requeue */
+      task->iov.iov_base += cqe->res;
+      task->iov.iov_len -= cqe->res;
+      requeue_task(ring, task);
+      /* Notify kernel that a CQE has been consumed successfully. */
+      io_uring_cqe_seen(ring, cqe);
+      continue;
+    }
+
+    /*
+     * All done. If write, nothing else to do. If read,
+     * queue up corresponding write.
+     * */
+    if (task->is_read) {
+      queue_write(ring, task);
+      io_uring_submit(ring);
+      *read_tasks -= 1;
+      *write_tasks += 1;
+    } else {
+      *bytes_to_write -= task->initial_len;
+      free(task);
+      *write_tasks -= 1;
+    }
+
+    io_uring_cqe_seen(ring, cqe);
+  }
+}
+
 int copy_file(struct io_uring *ring, off_t bytes_to_read) {
   off_t bytes_to_write = bytes_to_read;
   unsigned long read_tasks = 0;
@@ -155,72 +224,7 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
   while (bytes_to_read > 0 || bytes_to_write > 0) {
     spawn_read_tasks(ring, &read_tasks, &write_tasks, &bytes_to_read,
                      &read_offset);
-
-    /* Queue is full at this point. Let's find at least one completion */
-    bool already_found_completed_task = false;
-    while (bytes_to_write > 0) {
-      struct io_uring_cqe *cqe;
-      if (!already_found_completed_task) {
-        int ret = io_uring_wait_cqe(ring, &cqe);
-        if (ret < 0) {
-          fprintf(stderr, "io_uring_wait_cqe: %s\n", strerror(-ret));
-          exit(-1);
-        }
-
-        already_found_completed_task = true;
-      } else {
-        int ret = io_uring_peek_cqe(ring, &cqe);
-        if (ret == -EAGAIN) { // EAGAIN means retry. It also means currently CQ
-                              // is empty.
-          break;
-        }
-
-        if (ret < 0) {
-          fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
-          exit(-1);
-        }
-      }
-
-      struct io_task *task = io_uring_cqe_get_data(cqe);
-      if (cqe->res == -EAGAIN) { // EAGAIN means retry.
-        requeue_task(ring, task);
-        /* Notify kernel that a CQE has been consumed successfully. */
-        io_uring_cqe_seen(ring, cqe);
-        continue;
-      }
-
-      if (cqe->res < 0) {
-        fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
-        exit(-1);
-      }
-
-      if (cqe->res != task->iov.iov_len) {
-        /* short read/write; adjust and requeue */
-        task->iov.iov_base += cqe->res;
-        task->iov.iov_len -= cqe->res;
-        requeue_task(ring, task);
-        /* Notify kernel that a CQE has been consumed successfully. */
-        io_uring_cqe_seen(ring, cqe);
-        continue;
-      }
-
-      /*
-       * All done. If write, nothing else to do. If read,
-       * queue up corresponding write.
-       * */
-      if (task->is_read) {
-        queue_write(ring, task);
-        io_uring_submit(ring);
-        read_tasks -= 1;
-        write_tasks += 1;
-      } else {
-        bytes_to_write -= task->initial_len;
-        free(task);
-        write_tasks -= 1;
-      }
-
-      io_uring_cqe_seen(ring, cqe);
-    }
+    spawn_write_tasks(ring, &bytes_to_write, &read_tasks, &write_tasks);
   }
 
   return 0;
