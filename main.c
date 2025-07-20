@@ -10,7 +10,8 @@
 #include <unistd.h>
 
 #define QUEUE_DEPTH 32
-#define BS (16 * 1024)
+#define BLOCK_SZ (16 * 1024)
+#define min(x, y) ((x) < (y) ? (x) : (y))
 
 static int infd, outfd;
 
@@ -43,8 +44,7 @@ static off_t get_file_size(int fd) {
   }
 
   if (S_ISBLK(st.st_mode)) {
-    unsigned long long bytes;
-
+    off_t bytes;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
       fprintf(stderr, "get_file_size() failed. ioctl() failed.");
       exit(-1);
@@ -58,28 +58,28 @@ static off_t get_file_size(int fd) {
 }
 
 static void queue_prepped(struct io_uring *ring, struct io_data *data) {
-  struct io_uring_sqe *sqe;
+  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+  if (!sqe) {
+    fprintf(stderr, "queue_prepped() failed. io_uring_get_sqe() failed.");
+    exit(-1);
+  }
 
-  sqe = io_uring_get_sqe(ring);
-  assert(sqe);
-
-  if (data->read)
+  if (data->read) {
     io_uring_prep_readv(sqe, infd, &data->iov, 1, data->offset);
-  else
+  } else {
     io_uring_prep_writev(sqe, outfd, &data->iov, 1, data->offset);
+  }
 
   io_uring_sqe_set_data(sqe, data);
 }
 
 static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
-  struct io_uring_sqe *sqe;
-  struct io_data *data;
-
-  data = malloc(size + sizeof(*data));
-  if (!data)
+  struct io_data *data = malloc(size + sizeof(*data));
+  if (!data) {
     return 1;
+  }
 
-  sqe = io_uring_get_sqe(ring);
+  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
   if (!sqe) {
     free(data);
     return 1;
@@ -88,7 +88,7 @@ static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
   data->read = 1;
   data->offset = data->first_offset = offset;
 
-  data->iov.iov_base = data + 1;
+  data->iov.iov_base = data->bytes;
   data->iov.iov_len = size;
   data->first_len = size;
 
@@ -101,7 +101,7 @@ static void queue_write(struct io_uring *ring, struct io_data *data) {
   data->read = 0;
   data->offset = data->first_offset;
 
-  data->iov.iov_base = data + 1;
+  data->iov.iov_base = data->bytes;
   data->iov.iov_len = data->first_len;
 
   queue_prepped(ring, data);
@@ -109,13 +109,12 @@ static void queue_write(struct io_uring *ring, struct io_data *data) {
 }
 
 int copy_file(struct io_uring *ring, off_t insize) {
-  unsigned long reads, writes;
-  struct io_uring_cqe *cqe;
-  off_t write_left, offset;
   int ret;
 
-  write_left = insize;
-  writes = reads = offset = 0;
+  off_t write_left = insize;
+  off_t offset = 0;
+  unsigned long reads = 0;
+  unsigned long writes = 0;
 
   while (insize || write_left) {
     int had_reads, got_comp;
@@ -123,17 +122,19 @@ int copy_file(struct io_uring *ring, off_t insize) {
     /* Queue up as many reads as we can */
     had_reads = reads;
     while (insize) {
-      off_t this_size = insize;
+      if (reads + writes >= QUEUE_DEPTH) {
+        break;
+      }
 
-      if (reads + writes >= QUEUE_DEPTH)
-        break;
-      if (this_size > BS)
-        this_size = BS;
-      else if (!this_size)
-        break;
+      off_t this_size = min(insize, BLOCK_SZ);
 
-      if (queue_read(ring, this_size, offset))
+      if (this_size == 0) {
         break;
+      }
+
+      if (queue_read(ring, this_size, offset)) {
+        break;
+      }
 
       insize -= this_size;
       offset += this_size;
@@ -149,6 +150,7 @@ int copy_file(struct io_uring *ring, off_t insize) {
     }
 
     /* Queue is full at this point. Let's find at least one completion */
+    struct io_uring_cqe *cqe;
     got_comp = 0;
     while (write_left) {
       struct io_data *data;
@@ -217,7 +219,7 @@ int main(int argc, char *argv[]) {
 
   struct io_uring ring;
   int ret;
-  
+
   infd = open(argv[1], O_RDONLY);
   if (infd < 0) {
     perror("open infile");
