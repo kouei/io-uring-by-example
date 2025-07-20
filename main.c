@@ -58,7 +58,7 @@ static off_t get_file_size(int fd) {
   exit(-1);
 }
 
-static void queue_prepped(struct io_uring *ring, struct io_task *data) {
+static void requeue_task(struct io_uring *ring, struct io_task *data) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
@@ -176,7 +176,7 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
 
       struct io_task *data = io_uring_cqe_get_data(cqe);
       if (cqe->res == -EAGAIN) { // EAGAIN means retry.
-        queue_prepped(ring, data);
+        requeue_task(ring, data);
         /* Notify kernel that a CQE has been consumed successfully. */
         io_uring_cqe_seen(ring, cqe);
         continue;
@@ -191,7 +191,7 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
         /* short read/write; adjust and requeue */
         data->iov.iov_base += cqe->res;
         data->iov.iov_len -= cqe->res;
-        queue_prepped(ring, data);
+        requeue_task(ring, data);
         /* Notify kernel that a CQE has been consumed successfully. */
         io_uring_cqe_seen(ring, cqe);
         continue;
