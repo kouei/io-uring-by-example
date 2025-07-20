@@ -114,31 +114,32 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
   off_t bytes_to_write = bytes_to_read;
   unsigned long read_tasks = 0;
   unsigned long write_tasks = 0;
-  off_t offset = 0;
 
+  off_t read_offset = 0;
   while (bytes_to_read > 0 || bytes_to_write > 0) {
     /* Queue up as many reads as we can */
-    int had_reads = read_tasks;
+    int previous_read_tasks = read_tasks;
     while (bytes_to_read > 0) {
       if (read_tasks + write_tasks >= QUEUE_DEPTH) {
         break;
       }
 
-      off_t this_size = min(bytes_to_read, BLOCK_SZ);
+      off_t read_size = min(bytes_to_read, BLOCK_SZ);
 
-      if (queue_read(ring, this_size, offset))
+      if (queue_read(ring, read_size, read_offset)) {
         break;
+      }
 
-      bytes_to_read -= this_size;
-      offset += this_size;
+      bytes_to_read -= read_size;
+      read_offset += read_size;
       read_tasks += 1;
     }
 
-    if (had_reads != read_tasks) {
+    if (previous_read_tasks < read_tasks) {
       int ret = io_uring_submit(ring);
       if (ret < 0) {
         fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
-        break;
+        exit(-1);
       }
     }
 
@@ -204,10 +205,6 @@ int copy_file(struct io_uring *ring, off_t bytes_to_read) {
 }
 
 int main(int argc, char *argv[]) {
-  struct io_uring ring;
-  off_t insize;
-  int ret;
-
   if (argc < 3) {
     printf("Usage: %s <infile> <outfile>\n", argv[0]);
     return 1;
@@ -225,11 +222,12 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  struct io_uring ring;
   setup_context(QUEUE_DEPTH, &ring);
 
-  insize = get_file_size(infd);
+  off_t insize = get_file_size(infd);
 
-  ret = copy_file(&ring, insize);
+  int ret = copy_file(&ring, insize);
 
   close(infd);
   close(outfd);
