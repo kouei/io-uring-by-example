@@ -76,7 +76,7 @@ static void queue_prepped(struct io_uring *ring, struct io_task *data) {
 
 static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-  if (!sqe) {
+  if (sqe == NULL) {
     return -1;
   }
 
