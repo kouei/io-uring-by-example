@@ -14,7 +14,7 @@
 #define min(x, y) ((x) < (y) ? (x) : (y))
 
 static int infd, outfd;
-struct io_uring ring;
+static struct io_uring ring;
 
 struct io_task {
   bool is_read;
