@@ -14,6 +14,7 @@
 #define min(x, y) ((x) < (y) ? (x) : (y))
 
 static int infd, outfd;
+struct io_uring ring;
 
 struct io_task {
   bool is_read;
@@ -58,8 +59,8 @@ static off_t get_file_size(int fd) {
   exit(-1);
 }
 
-static void requeue_task(struct io_uring *ring, struct io_task *task) {
-  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+static void requeue_task(struct io_task *task) {
+  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
     exit(-1);
@@ -74,8 +75,8 @@ static void requeue_task(struct io_uring *ring, struct io_task *task) {
   io_uring_sqe_set_data(sqe, task);
 }
 
-static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
-  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+static int queue_read(off_t size, off_t offset) {
+  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     return -1;
   }
@@ -98,8 +99,8 @@ static int queue_read(struct io_uring *ring, off_t size, off_t offset) {
   return 0;
 }
 
-static void queue_write(struct io_uring *ring, struct io_task *task) {
-  struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+static void queue_write(struct io_task *task) {
+  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
     exit(-1);
@@ -115,9 +116,8 @@ static void queue_write(struct io_uring *ring, struct io_task *task) {
   io_uring_sqe_set_data(sqe, task);
 }
 
-void spawn_read_tasks(struct io_uring *ring, unsigned long *read_tasks,
-                      unsigned long *write_tasks, off_t *bytes_to_read,
-                      off_t *read_offset) {
+void spawn_read_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
+                      off_t *bytes_to_read, off_t *read_offset) {
   /* Queue up as many reads as we can */
   unsigned long previous_read_tasks = *read_tasks;
   while (*bytes_to_read > 0) {
@@ -127,7 +127,7 @@ void spawn_read_tasks(struct io_uring *ring, unsigned long *read_tasks,
 
     off_t read_size = min(*bytes_to_read, BLOCK_SZ);
 
-    int ret = queue_read(ring, read_size, *read_offset);
+    int ret = queue_read(read_size, *read_offset);
     if (ret < 0) {
       break;
     }
@@ -138,7 +138,7 @@ void spawn_read_tasks(struct io_uring *ring, unsigned long *read_tasks,
   }
 
   if (previous_read_tasks < *read_tasks) {
-    int ret = io_uring_submit(ring);
+    int ret = io_uring_submit(&ring);
     if (ret < 0) {
       fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
       exit(-1);
@@ -146,14 +146,14 @@ void spawn_read_tasks(struct io_uring *ring, unsigned long *read_tasks,
   }
 }
 
-void spawn_write_tasks(struct io_uring *ring, unsigned long *read_tasks,
-                       unsigned long *write_tasks, off_t *bytes_to_write) {
+void spawn_write_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
+                       off_t *bytes_to_write) {
   /* Queue is full at this point. Let's find at least one completion */
   bool already_found_completed_task = false;
   while (*bytes_to_write > 0) {
     struct io_uring_cqe *cqe;
     if (!already_found_completed_task) {
-      int ret = io_uring_wait_cqe(ring, &cqe);
+      int ret = io_uring_wait_cqe(&ring, &cqe);
       if (ret < 0) {
         fprintf(stderr, "io_uring_wait_cqe: %s\n", strerror(-ret));
         exit(-1);
@@ -161,7 +161,7 @@ void spawn_write_tasks(struct io_uring *ring, unsigned long *read_tasks,
 
       already_found_completed_task = true;
     } else {
-      int ret = io_uring_peek_cqe(ring, &cqe);
+      int ret = io_uring_peek_cqe(&ring, &cqe);
       if (ret == -EAGAIN) { // EAGAIN means retry. It also means currently CQ
                             // is empty.
         break;
@@ -175,9 +175,9 @@ void spawn_write_tasks(struct io_uring *ring, unsigned long *read_tasks,
 
     struct io_task *task = io_uring_cqe_get_data(cqe);
     if (cqe->res == -EAGAIN) { // EAGAIN means retry.
-      requeue_task(ring, task);
+      requeue_task(task);
       /* Notify kernel that a CQE has been consumed successfully. */
-      io_uring_cqe_seen(ring, cqe);
+      io_uring_cqe_seen(&ring, cqe);
       continue;
     }
 
@@ -190,9 +190,9 @@ void spawn_write_tasks(struct io_uring *ring, unsigned long *read_tasks,
       /* short read/write; adjust and requeue */
       task->iov.iov_base += cqe->res;
       task->iov.iov_len -= cqe->res;
-      requeue_task(ring, task);
+      requeue_task(task);
       /* Notify kernel that a CQE has been consumed successfully. */
-      io_uring_cqe_seen(ring, cqe);
+      io_uring_cqe_seen(&ring, cqe);
       continue;
     }
 
@@ -201,8 +201,8 @@ void spawn_write_tasks(struct io_uring *ring, unsigned long *read_tasks,
      * queue up corresponding write.
      * */
     if (task->is_read) {
-      queue_write(ring, task);
-      io_uring_submit(ring);
+      queue_write(task);
+      io_uring_submit(&ring);
       *read_tasks -= 1;
       *write_tasks += 1;
     } else {
@@ -211,11 +211,11 @@ void spawn_write_tasks(struct io_uring *ring, unsigned long *read_tasks,
       *write_tasks -= 1;
     }
 
-    io_uring_cqe_seen(ring, cqe);
+    io_uring_cqe_seen(&ring, cqe);
   }
 }
 
-int copy_file(struct io_uring *ring, off_t file_size) {
+int copy_file(off_t file_size) {
   off_t bytes_to_read = file_size;
   off_t read_offset = 0;
 
@@ -225,9 +225,8 @@ int copy_file(struct io_uring *ring, off_t file_size) {
   unsigned long write_tasks = 0;
 
   while (bytes_to_read > 0 || bytes_to_write > 0) {
-    spawn_read_tasks(ring, &read_tasks, &write_tasks, &bytes_to_read,
-                     &read_offset);
-    spawn_write_tasks(ring, &read_tasks, &write_tasks, &bytes_to_write);
+    spawn_read_tasks(&read_tasks, &write_tasks, &bytes_to_read, &read_offset);
+    spawn_write_tasks(&read_tasks, &write_tasks, &bytes_to_write);
   }
 
   return 0;
@@ -251,12 +250,11 @@ int main(int argc, char *argv[]) {
     exit(-1);
   }
 
-  struct io_uring ring;
   setup_context(QUEUE_DEPTH, &ring);
 
   off_t insize = get_file_size(infd);
 
-  int ret = copy_file(&ring, insize);
+  int ret = copy_file(insize);
 
   close(infd);
   close(outfd);
