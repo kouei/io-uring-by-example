@@ -26,14 +26,6 @@ struct io_task {
   char bytes[0]; /* Flexible Array. Real Data Payload. */
 };
 
-static void setup_context(unsigned entries, struct io_uring *ring) {
-  int ret = io_uring_queue_init(entries, ring, 0);
-  if (ret < 0) {
-    fprintf(stderr, "queue_init: %s\n", strerror(-ret));
-    exit(-1);
-  }
-}
-
 static off_t get_file_size(int fd) {
   struct stat st;
 
@@ -141,7 +133,7 @@ void spawn_read_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
   if (previous_read_tasks < *read_tasks) {
     int ret = io_uring_submit(&ring);
     if (ret < 0) {
-      fprintf(stderr, "io_uring_submit: %s\n", strerror(-ret));
+      fprintf(stderr, "io_uring_submit failed: %s\n", strerror(-ret));
       exit(-1);
     }
   }
@@ -156,7 +148,7 @@ void spawn_write_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
     if (!already_found_completed_task) {
       int ret = io_uring_wait_cqe(&ring, &cqe);
       if (ret < 0) {
-        fprintf(stderr, "io_uring_wait_cqe: %s\n", strerror(-ret));
+        fprintf(stderr, "io_uring_wait_cqe failed: %s\n", strerror(-ret));
         exit(-1);
       }
 
@@ -169,7 +161,7 @@ void spawn_write_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
       }
 
       if (ret < 0) {
-        fprintf(stderr, "io_uring_peek_cqe: %s\n", strerror(-ret));
+        fprintf(stderr, "io_uring_peek_cqe failed: %s\n", strerror(-ret));
         exit(-1);
       }
     }
@@ -239,17 +231,21 @@ int main(int argc, char *argv[]) {
 
   infd = open(argv[1], O_RDONLY);
   if (infd < 0) {
-    fprintf(stderr, "open infile");
+    fprintf(stderr, "open infile failed");
     exit(-1);
   }
 
   outfd = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (outfd < 0) {
-    fprintf(stderr, "open outfile");
+    fprintf(stderr, "open outfile failed");
     exit(-1);
   }
 
-  setup_context(QUEUE_DEPTH, &ring);
+  int ret = io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
+  if (ret < 0) {
+    fprintf(stderr, "io_uring_queue_init failed: %s\n", strerror(-ret));
+    exit(-1);
+  }
 
   off_t insize = get_file_size(infd);
 
