@@ -13,7 +13,8 @@
 #define BLOCK_SZ (16 * 1024)
 #define min(x, y) ((x) < (y) ? (x) : (y))
 
-static int infd, outfd;
+static int infd;
+static int outfd;
 static struct io_uring ring;
 
 struct io_task {
