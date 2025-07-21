@@ -215,7 +215,7 @@ void spawn_write_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
   }
 }
 
-int copy_file(off_t file_size) {
+void copy_file(off_t file_size) {
   off_t bytes_to_read = file_size;
   off_t read_offset = 0;
 
@@ -228,8 +228,6 @@ int copy_file(off_t file_size) {
     spawn_read_tasks(&read_tasks, &write_tasks, &bytes_to_read, &read_offset);
     spawn_write_tasks(&read_tasks, &write_tasks, &bytes_to_write);
   }
-
-  return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -254,10 +252,11 @@ int main(int argc, char *argv[]) {
 
   off_t insize = get_file_size(infd);
 
-  int ret = copy_file(insize);
+  copy_file(insize);
 
   close(infd);
   close(outfd);
   io_uring_queue_exit(&ring);
-  return ret;
+
+  return 0;
 }
