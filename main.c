@@ -23,7 +23,7 @@ struct io_task {
   off_t offset;
   size_t initial_len;
   struct iovec iov;
-  char bytes[0]; /* Flexible Array. Real Data Payload. */
+  char bytes[0]; /* Flexible Array Member. Real Data Payload. */
 };
 
 static off_t get_file_size(int fd) {
