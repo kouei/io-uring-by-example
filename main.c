@@ -251,9 +251,9 @@ int main(int argc, char *argv[]) {
 
   copy_file(insize);
 
-  close(infd);
-  close(outfd);
   io_uring_queue_exit(&ring);
+  close(outfd);
+  close(infd);
 
   return 0;
 }
