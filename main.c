@@ -375,15 +375,15 @@ void handle_get_method(char *path, int client_socket) {
  * error to the client.
  * */
 
-void handle_http_method(char *method_buffer, int client_socket) {
+void handle_http_verb(char *verb_buffer, int client_socket) {
   char *saveptr;
 
-  char *method = strtok_r(method_buffer, " ", &saveptr);
-  strtolower(method);
+  char *http_verb = strtok_r(verb_buffer, " ", &saveptr);
+  strtolower(http_verb);
 
   char *path = strtok_r(NULL, " ", &saveptr);
 
-  if (strcmp(method, "get") == 0) {
+  if (strcmp(http_verb, "get") == 0) {
     handle_get_method(path, client_socket);
   } else {
     handle_unimplemented_method(client_socket);
@@ -392,24 +392,25 @@ void handle_http_method(char *method_buffer, int client_socket) {
 
 int get_line(const char *src, char *dest, int dest_sz) {
   for (int i = 0; i < dest_sz; i++) {
-    dest[i] = src[i];
     if (src[i] == '\r' && src[i + 1] == '\n') {
       dest[i] = '\0';
       return 0;
     }
+
+    dest[i] = src[i];
   }
   return 1;
 }
 
-int handle_client_request(struct request *req) {
-  char http_request[1024];
+int handle_read_request(struct request *req) {
   /* Get the first line, which will be the request */
-  if (get_line(req->iov[0].iov_base, http_request, sizeof(http_request))) {
+  char line[1024];
+  if (get_line(req->iov[0].iov_base, line, sizeof(line))) {
     fprintf(stderr, "Malformed request\n");
     exit(1);
   }
 
-  handle_http_method(http_request, req->client_socket);
+  handle_http_verb(line, req->client_socket);
   return 0;
 }
 
@@ -420,7 +421,8 @@ void server_loop() {
     struct io_uring_cqe *cqe;
     int ret = io_uring_wait_cqe(&ring, &cqe);
     if (ret < 0) {
-      fatal_error("io_uring_wait_cqe");
+      fprintf(stderr, "io_uring_wait_cqe() failed. error = %s\n", strerror(-ret));
+      exit(1);
     }
 
     struct request *req = (struct request *)cqe->user_data;
@@ -442,7 +444,7 @@ void server_loop() {
         break;
       }
 
-      handle_client_request(req);
+      handle_read_request(req);
       free(req->iov[0].iov_base);
       break;
 
