@@ -345,15 +345,15 @@ void handle_get_method(char *path, int client_socket) {
    * like type (regular file, directory, etc), size, etc. */
   struct stat path_stat;
   if (stat(final_path, &path_stat) == -1) {
-    printf("404 Not Found: %s (%s)\n", final_path, path);
+    printf("Return 404: File Not Found: %s\n", final_path);
     handle_http_404(client_socket);
     return;
   }
 
   /* If this is not a regular file, return 404. */
   if (!S_ISREG(path_stat.st_mode)) {
+    printf("Return 404: Not a Regular File: %s\n", final_path);
     handle_http_404(client_socket);
-    printf("404 Not Found: %s\n", final_path);
     return;
   }
 
