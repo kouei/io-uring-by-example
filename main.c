@@ -14,6 +14,8 @@
 #define QUEUE_DEPTH 256
 #define READ_SZ 8192
 
+int server_socket;
+
 enum event_type_t {
   EVENT_TYPE_ACCEPT,
   EVENT_TYPE_READ,
@@ -85,6 +87,7 @@ void *zh_malloc(size_t size) {
     fprintf(stderr, "Fatal error: unable to allocate memory.\n");
     exit(1);
   }
+  
   return buf;
 }
 
@@ -123,17 +126,22 @@ int setup_listening_socket(int port) {
   return sock;
 }
 
-int add_accept_request(int server_socket, struct sockaddr_in *client_addr,
-                       socklen_t *client_addr_len) {
+void add_accept_request(struct sockaddr_in *client_addr,
+                        socklen_t *client_addr_len) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+  if (sqe == NULL) {
+    fprintf(stderr, "io_uring_get_sqe() failed.");
+    exit(-1);
+  }
+
   io_uring_prep_accept(sqe, server_socket, (struct sockaddr *)client_addr,
                        client_addr_len, 0);
+
   struct request *req = malloc(sizeof(*req));
   req->event_type = EVENT_TYPE_ACCEPT;
+
   io_uring_sqe_set_data(sqe, req);
   io_uring_submit(&ring);
-
-  return 0;
 }
 
 int add_read_request(int client_socket) {
@@ -383,11 +391,11 @@ int handle_client_request(struct request *req) {
   return 0;
 }
 
-void server_loop(int server_socket) {
+void server_loop() {
   struct sockaddr_in client_addr;
   socklen_t client_addr_len = sizeof(client_addr);
 
-  add_accept_request(server_socket, &client_addr, &client_addr_len);
+  add_accept_request(&client_addr, &client_addr_len);
 
   while (true) {
     struct io_uring_cqe *cqe;
@@ -405,23 +413,27 @@ void server_loop(int server_socket) {
 
     switch (req->event_type) {
     case EVENT_TYPE_ACCEPT:
-      add_accept_request(server_socket, &client_addr, &client_addr_len);
+      add_accept_request(&client_addr, &client_addr_len);
       add_read_request(cqe->res);
       break;
+
     case EVENT_TYPE_READ:
-      if (!cqe->res) {
+      if (cqe->res == 0) {
         fprintf(stderr, "Empty request!\n");
         break;
       }
+
       handle_client_request(req);
       free(req->iov[0].iov_base);
       break;
+
     case EVENT_TYPE_WRITE:
       for (int i = 0; i < req->iovec_count; i++) {
         free(req->iov[i].iov_base);
       }
       close(req->client_socket);
       break;
+
     default:
       fprintf(stderr, "Unexpected event type = %d\n", req->event_type);
       break;
@@ -444,8 +456,8 @@ int main() {
 
   io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
 
-  int server_socket = setup_listening_socket(DEFAULT_SERVER_PORT);
-  server_loop(server_socket);
+  server_socket = setup_listening_socket(DEFAULT_SERVER_PORT);
+  server_loop();
 
   return 0;
 }
