@@ -26,8 +26,8 @@ enum event_type_t {
 
 struct request {
   enum event_type_t event_type;
-  int iovec_count;
   int client_socket;
+  int iovec_count;
   struct iovec iov[0]; /* Flexible Array Member */
 };
 
@@ -167,14 +167,18 @@ int queue_write_request(struct request *req) {
   return 0;
 }
 
+void set_iov(struct iovec *iov, const char *content) {
+  iov->iov_len = strlen(content);
+  iov->iov_base = malloc(iov->iov_len);
+  memcpy(iov->iov_base, content, iov->iov_len);
+}
+
 void send_static_string_content(const char *str, int client_socket) {
   struct request *req = malloc(sizeof(*req) + sizeof(req->iov[0]));
 
-  req->iovec_count = 1;
   req->client_socket = client_socket;
-  req->iov[0].iov_len = strlen(str);
-  req->iov[0].iov_base = malloc(req->iov[0].iov_len);
-  memcpy(req->iov[0].iov_base, str, req->iov[0].iov_len);
+  req->iovec_count = 1;
+  set_iov(&req->iov[0], str);
 
   queue_write_request(req);
 }
@@ -250,12 +254,6 @@ const char *get_filename_ext(const char *filename) {
   }
 
   return dot + 1;
-}
-
-void set_iov(struct iovec *iov, const char *content) {
-  iov->iov_len = strlen(content);
-  iov->iov_base = malloc(iov->iov_len);
-  memcpy(iov->iov_base, content, iov->iov_len);
 }
 
 /*
