@@ -477,6 +477,7 @@ int main() {
   io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
 
   setup_listening_socket();
+
   server_loop();
 
   return 0;
