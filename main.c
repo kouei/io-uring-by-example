@@ -97,7 +97,7 @@ void *zh_malloc(size_t size) {
  * the web server.
  * */
 
-int setup_listening_socket(int port) {
+int setup_listening_socket() {
   int sock = socket(PF_INET, SOCK_STREAM, 0);
   if (sock == -1) {
     fatal_error("socket()");
@@ -110,17 +110,19 @@ int setup_listening_socket(int port) {
 
   struct sockaddr_in srv_addr = {};
   srv_addr.sin_family = AF_INET;
-  srv_addr.sin_port = htons(port);
+  srv_addr.sin_port = htons(DEFAULT_SERVER_PORT);
   srv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
   /* We bind to a port and turn this socket into a listening
    * socket.
    * */
-  if (bind(sock, (const struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0) {
+  int ret = bind(sock, (const struct sockaddr *)&srv_addr, sizeof(srv_addr));
+  if (ret < 0) {
     fatal_error("bind()");
   }
 
-  if (listen(sock, 10) < 0) {
+  ret = listen(sock, 10);
+  if (ret < 0) {
     fatal_error("listen()");
   }
 
@@ -453,7 +455,7 @@ int main() {
 
   io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
 
-  server_socket = setup_listening_socket(DEFAULT_SERVER_PORT);
+  server_socket = setup_listening_socket();
   server_loop();
 
   return 0;
