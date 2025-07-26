@@ -9,10 +9,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define SERVER_STRING "Server: zerohttpd/0.1\r\n"
 #define DEFAULT_SERVER_PORT 8000
 #define QUEUE_DEPTH 256
 #define READ_SZ 8192
+
+const char SERVER_STRING[] = "Server: zerohttpd/0.1\r\n";
 
 int server_socket;
 struct sockaddr_in client_addr;
@@ -152,8 +153,8 @@ int add_read_request(int client_socket) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
     exit(-1);
   }
-  
-  struct request *req = malloc(sizeof(*req) + sizeof(struct iovec));
+
+  struct request *req = malloc(sizeof(*req) + sizeof(req->iov[0]));
   req->event_type = EVENT_TYPE_READ;
   req->iov[0].iov_base = malloc(READ_SZ);
   req->iov[0].iov_len = READ_SZ;
@@ -173,7 +174,7 @@ int add_write_request(struct request *req) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
     exit(-1);
   }
-  
+
   req->event_type = EVENT_TYPE_WRITE;
 
   io_uring_prep_writev(sqe, req->client_socket, req->iov, req->iovec_count, 0);
@@ -182,14 +183,15 @@ int add_write_request(struct request *req) {
   return 0;
 }
 
-void _send_static_string_content(const char *str, int client_socket) {
-  struct request *req = zh_malloc(sizeof(*req) + sizeof(struct iovec));
-  unsigned long slen = strlen(str);
+void send_static_string_content(const char *str, int client_socket) {
+  struct request *req = zh_malloc(sizeof(*req) + sizeof(req->iov[0]));
+
   req->iovec_count = 1;
   req->client_socket = client_socket;
-  req->iov[0].iov_base = zh_malloc(slen);
-  req->iov[0].iov_len = slen;
-  memcpy(req->iov[0].iov_base, str, slen);
+  req->iov[0].iov_len = strlen(str);
+  req->iov[0].iov_base = zh_malloc(req->iov[0].iov_len);
+  memcpy(req->iov[0].iov_base, str, req->iov[0].iov_len);
+
   add_write_request(req);
 }
 
@@ -199,7 +201,7 @@ void _send_static_string_content(const char *str, int client_socket) {
  * */
 
 void handle_unimplemented_method(int client_socket) {
-  _send_static_string_content(unimplemented_content, client_socket);
+  send_static_string_content(unimplemented_content, client_socket);
 }
 
 /*
@@ -208,7 +210,7 @@ void handle_unimplemented_method(int client_socket) {
  * */
 
 void handle_http_404(int client_socket) {
-  _send_static_string_content(http_404_content, client_socket);
+  send_static_string_content(http_404_content, client_socket);
 }
 
 /*
@@ -219,22 +221,21 @@ void handle_http_404(int client_socket) {
  * */
 
 void copy_file_contents(char *file_path, off_t file_size, struct iovec *iov) {
-  int fd;
-
-  char *buf = zh_malloc(file_size);
-  fd = open(file_path, O_RDONLY);
-  if (fd < 0)
+  int fd = open(file_path, O_RDONLY);
+  if (fd < 0) {
     fatal_error("read");
+  }
 
   /* We should really check for short reads here */
+  char *buf = zh_malloc(file_size);
   int ret = read(fd, buf, file_size);
   if (ret < file_size) {
     fprintf(stderr, "Encountered a short read.\n");
   }
-  close(fd);
 
   iov->iov_base = buf;
   iov->iov_len = file_size;
+  close(fd);
 }
 
 /*
@@ -244,8 +245,10 @@ void copy_file_contents(char *file_path, off_t file_size, struct iovec *iov) {
 
 const char *get_filename_ext(const char *filename) {
   const char *dot = strrchr(filename, '.');
-  if (!dot || dot == filename)
+  if (!dot || dot == filename) {
     return "";
+  }
+
   return dot + 1;
 }
 
@@ -258,20 +261,17 @@ const char *get_filename_ext(const char *filename) {
 
 void send_headers(const char *path, off_t len, struct iovec *iov) {
   char small_case_path[1024];
-  char send_buffer[1024];
   strcpy(small_case_path, path);
   strtolower(small_case_path);
 
-  char *str = "HTTP/1.0 200 OK\r\n";
-  unsigned long slen = strlen(str);
-  iov[0].iov_base = zh_malloc(slen);
-  iov[0].iov_len = slen;
-  memcpy(iov[0].iov_base, str, slen);
+  char str[] = "HTTP/1.0 200 OK\r\n";
+  iov[0].iov_len = sizeof(str) - 1;
+  iov[0].iov_base = zh_malloc(iov[0].iov_len);
+  memcpy(iov[0].iov_base, str, iov[0].iov_len);
 
-  slen = strlen(SERVER_STRING);
-  iov[1].iov_base = zh_malloc(slen);
-  iov[1].iov_len = slen;
-  memcpy(iov[1].iov_base, SERVER_STRING, slen);
+  iov[1].iov_len = sizeof(SERVER_STRING) - 1;
+  iov[1].iov_base = zh_malloc(iov[1].iov_len);
+  memcpy(iov[1].iov_base, SERVER_STRING, iov[1].iov_len);
 
   /*
    * Check the file extension for certain common types of files
@@ -279,46 +279,50 @@ void send_headers(const char *path, off_t len, struct iovec *iov) {
    * Since extensions can be mixed case like JPG, jpg or Jpg,
    * we turn the extension into lower case before checking.
    * */
+  char send_buffer[1024];
   const char *file_ext = get_filename_ext(small_case_path);
-  if (strcmp("jpg", file_ext) == 0)
+  if (strcmp("jpg", file_ext) == 0) {
     strcpy(send_buffer, "Content-Type: image/jpeg\r\n");
-  if (strcmp("jpeg", file_ext) == 0)
+  } else if (strcmp("jpeg", file_ext) == 0) {
     strcpy(send_buffer, "Content-Type: image/jpeg\r\n");
-  if (strcmp("png", file_ext) == 0)
+  } else if (strcmp("png", file_ext) == 0) {
     strcpy(send_buffer, "Content-Type: image/png\r\n");
-  if (strcmp("gif", file_ext) == 0)
+  } else if (strcmp("gif", file_ext) == 0) {
     strcpy(send_buffer, "Content-Type: image/gif\r\n");
-  if (strcmp("htm", file_ext) == 0)
+  } else if (strcmp("htm", file_ext) == 0) {
     strcpy(send_buffer, "Content-Type: text/html\r\n");
-  if (strcmp("html", file_ext) == 0)
+  } else if (strcmp("html", file_ext) == 0) {
     strcpy(send_buffer, "Content-Type: text/html\r\n");
-  if (strcmp("js", file_ext) == 0)
+  } else if (strcmp("js", file_ext) == 0) {
     strcpy(send_buffer, "Content-Type: application/javascript\r\n");
-  if (strcmp("css", file_ext) == 0)
+  } else if (strcmp("css", file_ext) == 0) {
     strcpy(send_buffer, "Content-Type: text/css\r\n");
-  if (strcmp("txt", file_ext) == 0)
+  } else if (strcmp("txt", file_ext) == 0) {
     strcpy(send_buffer, "Content-Type: text/plain\r\n");
-  slen = strlen(send_buffer);
-  iov[2].iov_base = zh_malloc(slen);
-  iov[2].iov_len = slen;
-  memcpy(iov[2].iov_base, send_buffer, slen);
+  } else {
+    fprintf(stderr, "Unexpected file extension = %s\n", file_ext);
+    exit(-1);
+  }
+
+  iov[2].iov_len = strlen(send_buffer);
+  iov[2].iov_base = zh_malloc(iov[2].iov_len);
+  memcpy(iov[2].iov_base, send_buffer, iov[2].iov_len);
 
   /* Send the content-length header, which is the file size in this case. */
   sprintf(send_buffer, "content-length: %ld\r\n", len);
-  slen = strlen(send_buffer);
-  iov[3].iov_base = zh_malloc(slen);
-  iov[3].iov_len = slen;
-  memcpy(iov[3].iov_base, send_buffer, slen);
+
+  iov[3].iov_len = strlen(send_buffer);
+  iov[3].iov_base = zh_malloc(iov[3].iov_len);
+  memcpy(iov[3].iov_base, send_buffer, iov[3].iov_len);
 
   /*
    * When the browser sees a '\r\n' sequence in a line on its own,
    * it understands there are no more headers. Content may follow.
    * */
   strcpy(send_buffer, "\r\n");
-  slen = strlen(send_buffer);
-  iov[4].iov_base = zh_malloc(slen);
-  iov[4].iov_len = slen;
-  memcpy(iov[4].iov_base, send_buffer, slen);
+  iov[4].iov_len = strlen(send_buffer);
+  iov[4].iov_base = zh_malloc(iov[4].iov_len);
+  memcpy(iov[4].iov_base, send_buffer, iov[4].iov_len);
 }
 
 void handle_get_method(char *path, int client_socket) {
@@ -347,8 +351,7 @@ void handle_get_method(char *path, int client_socket) {
     /* Check if this is a normal/regular file and not a directory or something
      * else */
     if (S_ISREG(path_stat.st_mode)) {
-      struct request *req =
-          zh_malloc(sizeof(*req) + (sizeof(struct iovec) * 6));
+      struct request *req = zh_malloc(sizeof(*req) + (sizeof(req->iov[0]) * 6));
       req->iovec_count = 6;
       req->client_socket = client_socket;
       send_headers(final_path, path_stat.st_size, req->iov);
