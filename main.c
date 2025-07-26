@@ -269,10 +269,12 @@ void send_headers(const char *path, off_t len, struct iovec *iov) {
     memcpy(iov[0].iov_base, str, iov[0].iov_len);
   }
 
-  const char SERVER_STRING[] = "Server: zerohttpd/0.1\r\n";
-  iov[1].iov_len = sizeof(SERVER_STRING) - 1;
-  iov[1].iov_base = zh_malloc(iov[1].iov_len);
-  memcpy(iov[1].iov_base, SERVER_STRING, iov[1].iov_len);
+  {
+    const char str[] = "Server: zerohttpd/0.1\r\n";
+    iov[1].iov_len = sizeof(str) - 1;
+    iov[1].iov_base = zh_malloc(iov[1].iov_len);
+    memcpy(iov[1].iov_base, str, iov[1].iov_len);
+  }
 
   /*
    * Check the file extension for certain common types of files
@@ -311,7 +313,6 @@ void send_headers(const char *path, off_t len, struct iovec *iov) {
 
   /* Send the content-length header, which is the file size in this case. */
   sprintf(send_buffer, "content-length: %ld\r\n", len);
-
   iov[3].iov_len = strlen(send_buffer);
   iov[3].iov_base = zh_malloc(iov[3].iov_len);
   memcpy(iov[3].iov_base, send_buffer, iov[3].iov_len);
