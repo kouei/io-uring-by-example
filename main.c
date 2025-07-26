@@ -78,20 +78,6 @@ void fatal_error(const char *syscall) {
 }
 
 /*
- * Helper function for cleaner looking code.
- * */
-
-void *zh_malloc(size_t size) {
-  void *buf = malloc(size);
-  if (!buf) {
-    fprintf(stderr, "Fatal error: unable to allocate memory.\n");
-    exit(1);
-  }
-
-  return buf;
-}
-
-/*
  * This function is responsible for setting up the main listening socket used by
  * the web server.
  * */
@@ -182,12 +168,12 @@ int queue_write_request(struct request *req) {
 }
 
 void send_static_string_content(const char *str, int client_socket) {
-  struct request *req = zh_malloc(sizeof(*req) + sizeof(req->iov[0]));
+  struct request *req = malloc(sizeof(*req) + sizeof(req->iov[0]));
 
   req->iovec_count = 1;
   req->client_socket = client_socket;
   req->iov[0].iov_len = strlen(str);
-  req->iov[0].iov_base = zh_malloc(req->iov[0].iov_len);
+  req->iov[0].iov_base = malloc(req->iov[0].iov_len);
   memcpy(req->iov[0].iov_base, str, req->iov[0].iov_len);
 
   queue_write_request(req);
@@ -225,7 +211,7 @@ void copy_file_contents(char *file_path, off_t file_size, struct iovec *iov) {
   }
 
   /* We should really check for short reads here */
-  char *buf = zh_malloc(file_size);
+  char *buf = malloc(file_size);
   int ret = read(fd, buf, file_size);
   if (ret < file_size) {
     fprintf(stderr, "Encountered a short read.\n");
@@ -250,6 +236,12 @@ const char *get_filename_ext(const char *filename) {
   return dot + 1;
 }
 
+void set_iov(struct iovec *iov, const char *content) {
+  iov->iov_len = strlen(content);
+  iov->iov_base = malloc(iov->iov_len);
+  memcpy(iov->iov_base, content, iov->iov_len);
+}
+
 /*
  * Sends the HTTP 200 OK header, the server string, for a few types of files, it
  * can also send the content type based on the file extension. It also sends the
@@ -262,19 +254,11 @@ void send_headers(const char *path, off_t len, struct iovec *iov) {
   strcpy(small_case_path, path);
   strtolower(small_case_path);
 
-  {
-    const char str[] = "HTTP/1.0 200 OK\r\n";
-    iov[0].iov_len = sizeof(str) - 1;
-    iov[0].iov_base = zh_malloc(iov[0].iov_len);
-    memcpy(iov[0].iov_base, str, iov[0].iov_len);
-  }
+  const char *str = "HTTP/1.0 200 OK\r\n";
+  set_iov(&iov[0], str);
 
-  {
-    const char str[] = "Server: zerohttpd/0.1\r\n";
-    iov[1].iov_len = sizeof(str) - 1;
-    iov[1].iov_base = zh_malloc(iov[1].iov_len);
-    memcpy(iov[1].iov_base, str, iov[1].iov_len);
-  }
+  str = "Server: zerohttpd/0.1\r\n";
+  set_iov(&iov[1], str);
 
   /*
    * Check the file extension for certain common types of files
@@ -307,26 +291,18 @@ void send_headers(const char *path, off_t len, struct iovec *iov) {
     exit(-1);
   }
 
-  iov[2].iov_len = strlen(send_buffer);
-  iov[2].iov_base = zh_malloc(iov[2].iov_len);
-  memcpy(iov[2].iov_base, send_buffer, iov[2].iov_len);
+  set_iov(&iov[2], send_buffer);
 
   /* Send the content-length header, which is the file size in this case. */
   sprintf(send_buffer, "content-length: %ld\r\n", len);
-  iov[3].iov_len = strlen(send_buffer);
-  iov[3].iov_base = zh_malloc(iov[3].iov_len);
-  memcpy(iov[3].iov_base, send_buffer, iov[3].iov_len);
+  set_iov(&iov[3], send_buffer);
 
   /*
    * When the browser sees a '\r\n' sequence in a line on its own,
    * it understands there are no more headers. Content may follow.
    * */
-  {
-    const char str[] = "\r\n";
-    iov[4].iov_len = sizeof(str) - 1;
-    iov[4].iov_base = zh_malloc(iov[4].iov_len);
-    memcpy(iov[4].iov_base, str, iov[4].iov_len);
-  }
+  str = "\r\n";
+  set_iov(&iov[4], str);
 }
 
 void handle_get_method(char *path, int client_socket) {
@@ -357,7 +333,7 @@ void handle_get_method(char *path, int client_socket) {
     return;
   }
 
-  struct request *req = zh_malloc(sizeof(*req) + (sizeof(req->iov[0]) * 6));
+  struct request *req = malloc(sizeof(*req) + (sizeof(req->iov[0]) * 6));
   req->iovec_count = 6;
   req->client_socket = client_socket;
 
