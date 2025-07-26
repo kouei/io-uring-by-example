@@ -128,7 +128,7 @@ int setup_listening_socket() {
   return sock;
 }
 
-void add_accept_request() {
+void queue_accept_request() {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
@@ -145,7 +145,7 @@ void add_accept_request() {
   io_uring_submit(&ring);
 }
 
-int add_read_request(int client_socket) {
+int queue_read_request(int client_socket) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
@@ -154,10 +154,10 @@ int add_read_request(int client_socket) {
 
   struct request *req = malloc(sizeof(*req) + sizeof(req->iov[0]));
   req->event_type = EVENT_TYPE_READ;
-  req->iov[0].iov_base = malloc(READ_SZ);
   req->iov[0].iov_len = READ_SZ;
+  req->iov[0].iov_base = malloc(req->iov[0].iov_len);
   req->client_socket = client_socket;
-  memset(req->iov[0].iov_base, 0, READ_SZ);
+  memset(req->iov[0].iov_base, 0, req->iov[0].iov_len);
 
   /* Linux kernel 5.5 has support for readv, but not for recv() or read() */
   io_uring_prep_readv(sqe, client_socket, &req->iov[0], 1, 0);
@@ -166,7 +166,7 @@ int add_read_request(int client_socket) {
   return 0;
 }
 
-int add_write_request(struct request *req) {
+int queue_write_request(struct request *req) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
@@ -190,7 +190,7 @@ void send_static_string_content(const char *str, int client_socket) {
   req->iov[0].iov_base = zh_malloc(req->iov[0].iov_len);
   memcpy(req->iov[0].iov_base, str, req->iov[0].iov_len);
 
-  add_write_request(req);
+  queue_write_request(req);
 }
 
 /*
@@ -360,9 +360,10 @@ void handle_get_method(char *path, int client_socket) {
   struct request *req = zh_malloc(sizeof(*req) + (sizeof(req->iov[0]) * 6));
   req->iovec_count = 6;
   req->client_socket = client_socket;
+
   send_headers(final_path, path_stat.st_size, req->iov);
   copy_file_contents(final_path, path_stat.st_size, &req->iov[5]);
-  add_write_request(req);
+  queue_write_request(req);
 
   printf("200 %s %ld bytes\n", final_path, path_stat.st_size);
 }
@@ -375,11 +376,12 @@ void handle_get_method(char *path, int client_socket) {
  * */
 
 void handle_http_method(char *method_buffer, int client_socket) {
-  char *method, *path, *saveptr;
+  char *saveptr;
 
-  method = strtok_r(method_buffer, " ", &saveptr);
+  char *method = strtok_r(method_buffer, " ", &saveptr);
   strtolower(method);
-  path = strtok_r(NULL, " ", &saveptr);
+
+  char *path = strtok_r(NULL, " ", &saveptr);
 
   if (strcmp(method, "get") == 0) {
     handle_get_method(path, client_socket);
@@ -406,12 +408,13 @@ int handle_client_request(struct request *req) {
     fprintf(stderr, "Malformed request\n");
     exit(1);
   }
+
   handle_http_method(http_request, req->client_socket);
   return 0;
 }
 
 void server_loop() {
-  add_accept_request();
+  queue_accept_request();
 
   while (true) {
     struct io_uring_cqe *cqe;
@@ -429,8 +432,8 @@ void server_loop() {
 
     switch (req->event_type) {
     case EVENT_TYPE_ACCEPT:
-      add_accept_request();
-      add_read_request(cqe->res);
+      queue_accept_request();
+      queue_read_request(cqe->res);
       break;
 
     case EVENT_TYPE_READ:
