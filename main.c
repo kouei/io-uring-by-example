@@ -148,12 +148,18 @@ void add_accept_request() {
 
 int add_read_request(int client_socket) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+  if (sqe == NULL) {
+    fprintf(stderr, "io_uring_get_sqe() failed.");
+    exit(-1);
+  }
+  
   struct request *req = malloc(sizeof(*req) + sizeof(struct iovec));
+  req->event_type = EVENT_TYPE_READ;
   req->iov[0].iov_base = malloc(READ_SZ);
   req->iov[0].iov_len = READ_SZ;
-  req->event_type = EVENT_TYPE_READ;
   req->client_socket = client_socket;
   memset(req->iov[0].iov_base, 0, READ_SZ);
+
   /* Linux kernel 5.5 has support for readv, but not for recv() or read() */
   io_uring_prep_readv(sqe, client_socket, &req->iov[0], 1, 0);
   io_uring_sqe_set_data(sqe, req);
@@ -163,7 +169,13 @@ int add_read_request(int client_socket) {
 
 int add_write_request(struct request *req) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+  if (sqe == NULL) {
+    fprintf(stderr, "io_uring_get_sqe() failed.");
+    exit(-1);
+  }
+  
   req->event_type = EVENT_TYPE_WRITE;
+
   io_uring_prep_writev(sqe, req->client_socket, req->iov, req->iovec_count, 0);
   io_uring_sqe_set_data(sqe, req);
   io_uring_submit(&ring);
