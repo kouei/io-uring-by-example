@@ -18,14 +18,14 @@ struct sockaddr_in client_addr;
 socklen_t client_addr_len = sizeof(client_addr);
 struct io_uring ring;
 
-enum event_type_t {
+enum event_type {
   EVENT_TYPE_ACCEPT,
   EVENT_TYPE_READ,
   EVENT_TYPE_WRITE,
 };
 
 struct request {
-  enum event_type_t event_type;
+  enum event_type event_type;
   int client_socket;
   int iovec_count;
   struct iovec iov[0]; /* Flexible Array Member */
