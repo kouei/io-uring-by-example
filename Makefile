@@ -1,10 +1,10 @@
 C_STD := -std=gnu11
-CC_FLAG := -O2 -Wall -luring $(C_STD)
+CC_FLAG := -g -O0 -Wall -luring $(C_STD)
 
 main: main.c
-	gcc $^ -o $@ $(CC_FLAG)
+	gcc $^ $(CC_FLAG) -o $@
 
-.PHONY: clean clang-tidy
+.PHONY: clang-tidy clang-format clean
 
 clang-tidy:
 	clang-tidy ./main.c -- $(C_STD)
