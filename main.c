@@ -403,14 +403,22 @@ int get_line(const char *src, char *dest, int dest_sz) {
 }
 
 int handle_read_request(struct request *req) {
+  // An example of the content of "req->iov[0].iov_base" is like the following:
+  //
+  // GET /index.html HTTP/1.1\r\n
+  // Host: 127.0.0.1:8000\r\n
+  // User-Agent: curl/8.5.0\r\n
+  // Accept: */*\r\n\r\n
+
   /* Get the first line, which will be the request */
-  char line[1024];
-  if (get_line(req->iov[0].iov_base, line, sizeof(line))) {
+  char first_line[1024];
+  if (get_line(req->iov[0].iov_base, first_line, sizeof(first_line))) {
     fprintf(stderr, "Malformed request\n");
     exit(1);
   }
 
-  handle_http_verb(line, req->client_socket);
+  // Now first_line == "GET /index.html HTTP/1.1"
+  handle_http_verb(first_line, req->client_socket);
   return 0;
 }
 
@@ -421,7 +429,8 @@ void server_loop() {
     struct io_uring_cqe *cqe;
     int ret = io_uring_wait_cqe(&ring, &cqe);
     if (ret < 0) {
-      fprintf(stderr, "io_uring_wait_cqe() failed. error = %s\n", strerror(-ret));
+      fprintf(stderr, "io_uring_wait_cqe() failed. error = %s\n",
+              strerror(-ret));
       exit(1);
     }
 
