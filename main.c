@@ -28,7 +28,7 @@ struct request {
   enum event_type_t event_type;
   int iovec_count;
   int client_socket;
-  struct iovec iov[0];
+  struct iovec iov[0]; /* Flexible Array Member */
 };
 
 const char *unimplemented_content =
@@ -354,6 +354,7 @@ void handle_get_method(char *path, int client_socket) {
   if (!S_ISREG(path_stat.st_mode)) {
     handle_http_404(client_socket);
     printf("404 Not Found: %s\n", final_path);
+    return;
   }
 
   struct request *req = zh_malloc(sizeof(*req) + (sizeof(req->iov[0]) * 6));
