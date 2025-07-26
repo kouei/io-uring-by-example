@@ -82,7 +82,7 @@ void fatal_error(const char *syscall) {
  * the web server.
  * */
 
-int setup_listening_socket() {
+void setup_listening_socket() {
   int sock = socket(PF_INET, SOCK_STREAM, 0);
   if (sock == -1) {
     fatal_error("socket()");
@@ -111,7 +111,7 @@ int setup_listening_socket() {
     fatal_error("listen()");
   }
 
-  return sock;
+  server_socket = sock;
 }
 
 void queue_accept_request() {
@@ -476,7 +476,7 @@ int main() {
 
   io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
 
-  server_socket = setup_listening_socket();
+  setup_listening_socket();
   server_loop();
 
   return 0;
