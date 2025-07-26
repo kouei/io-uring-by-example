@@ -324,7 +324,7 @@ void send_headers(const char *path, off_t len, struct iovec *iov) {
     const char str[] = "\r\n";
     iov[4].iov_len = sizeof(str) - 1;
     iov[4].iov_base = zh_malloc(iov[4].iov_len);
-    memcpy(iov[4].iov_base, send_buffer, iov[4].iov_len);
+    memcpy(iov[4].iov_base, str, iov[4].iov_len);
   }
 }
 
