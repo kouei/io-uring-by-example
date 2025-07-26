@@ -319,7 +319,7 @@ void prepare_headers(const char *path, off_t len, struct iovec *iov) {
   set_iov(&iov[4], str);
 }
 
-void handle_get_method(char *path, int client_socket) {
+void handle_get_verb(char *path, int client_socket) {
   char final_path[1024] = "http-home";
   strcat(final_path, path);
 
@@ -374,7 +374,7 @@ void handle_http_verb(char *verb_buffer, int client_socket) {
   char *path = strtok_r(NULL, " ", &saveptr);
 
   if (strcmp(http_verb, "get") == 0) {
-    handle_get_method(path, client_socket);
+    handle_get_verb(path, client_socket);
   } else {
     handle_unimplemented_method(client_socket);
   }
