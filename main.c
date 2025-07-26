@@ -211,14 +211,29 @@ void copy_file_contents(char *file_path, off_t file_size, struct iovec *iov) {
   }
 
   /* We should really check for short reads here */
-  char *buf = malloc(file_size);
-  int ret = read(fd, buf, file_size);
-  if (ret < file_size) {
-    fprintf(stderr, "Encountered a short read.\n");
+  iov->iov_len = file_size;
+  iov->iov_base = malloc(iov->iov_len);
+
+  int offset = 0;
+  int bytes_to_read = iov->iov_len;
+
+  while (true) {
+    int ret = read(fd, iov->iov_base + offset, bytes_to_read);
+    if (ret < 0) {
+      fprintf(stderr, "read() failed. error = %s\n", strerror(-ret));
+      exit(1);
+    }
+
+    if (ret == bytes_to_read) {
+      break;
+    }
+
+    if (ret < bytes_to_read) {
+      offset += ret;
+      bytes_to_read -= ret;
+    }
   }
 
-  iov->iov_base = buf;
-  iov->iov_len = file_size;
   close(fd);
 }
 
@@ -249,7 +264,7 @@ void set_iov(struct iovec *iov, const char *content) {
  * signalling the end of headers and the beginning of any content.
  * */
 
-void send_headers(const char *path, off_t len, struct iovec *iov) {
+void prepare_headers(const char *path, off_t len, struct iovec *iov) {
   char small_case_path[1024];
   strcpy(small_case_path, path);
   strtolower(small_case_path);
@@ -337,7 +352,7 @@ void handle_get_method(char *path, int client_socket) {
   req->iovec_count = 6;
   req->client_socket = client_socket;
 
-  send_headers(final_path, path_stat.st_size, req->iov);
+  prepare_headers(final_path, path_stat.st_size, req->iov);
   copy_file_contents(final_path, path_stat.st_size, &req->iov[5]);
   queue_write_request(req);
 
