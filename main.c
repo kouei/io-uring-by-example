@@ -13,8 +13,6 @@
 #define QUEUE_DEPTH 256
 #define READ_SZ 8192
 
-const char SERVER_STRING[] = "Server: zerohttpd/0.1\r\n";
-
 int server_socket;
 struct sockaddr_in client_addr;
 socklen_t client_addr_len = sizeof(client_addr);
@@ -264,11 +262,12 @@ void send_headers(const char *path, off_t len, struct iovec *iov) {
   strcpy(small_case_path, path);
   strtolower(small_case_path);
 
-  char str[] = "HTTP/1.0 200 OK\r\n";
+  const char str[] = "HTTP/1.0 200 OK\r\n";
   iov[0].iov_len = sizeof(str) - 1;
   iov[0].iov_base = zh_malloc(iov[0].iov_len);
   memcpy(iov[0].iov_base, str, iov[0].iov_len);
 
+  const char SERVER_STRING[] = "Server: zerohttpd/0.1\r\n";
   iov[1].iov_len = sizeof(SERVER_STRING) - 1;
   iov[1].iov_base = zh_malloc(iov[1].iov_len);
   memcpy(iov[1].iov_base, SERVER_STRING, iov[1].iov_len);
