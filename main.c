@@ -207,18 +207,19 @@ void handle_http_404(int client_socket) {
 void copy_file_contents(char *file_path, off_t file_size, struct iovec *iov) {
   int fd = open(file_path, O_RDONLY);
   if (fd < 0) {
-    fatal_error("read");
+    fprintf(stderr, "open() failed. error = %s\n", strerror(-fd));
+    exit(1);
   }
 
   /* We should really check for short reads here */
   iov->iov_len = file_size;
   iov->iov_base = malloc(iov->iov_len);
 
-  int offset = 0;
+  char *buf = iov->iov_base;
   int bytes_to_read = iov->iov_len;
 
   while (true) {
-    int ret = read(fd, iov->iov_base + offset, bytes_to_read);
+    int ret = read(fd, buf, bytes_to_read);
     if (ret < 0) {
       fprintf(stderr, "read() failed. error = %s\n", strerror(-ret));
       exit(1);
@@ -229,7 +230,7 @@ void copy_file_contents(char *file_path, off_t file_size, struct iovec *iov) {
     }
 
     if (ret < bytes_to_read) {
-      offset += ret;
+      buf += ret;
       bytes_to_read -= ret;
     }
   }
