@@ -330,19 +330,15 @@ void send_headers(const char *path, off_t len, struct iovec *iov) {
 }
 
 void handle_get_method(char *path, int client_socket) {
-  char final_path[1024];
+  char final_path[1024] = "http-home";
+  strcat(final_path, path);
 
   /*
    If a path ends in a trailing slash, the client probably wants the index
    file inside of that directory.
    */
   if (path[strlen(path) - 1] == '/') {
-    strcpy(final_path, "public");
-    strcat(final_path, path);
     strcat(final_path, "index.html");
-  } else {
-    strcpy(final_path, "public");
-    strcat(final_path, path);
   }
 
   /* The stat() system call will give you information about the file
@@ -351,22 +347,23 @@ void handle_get_method(char *path, int client_socket) {
   if (stat(final_path, &path_stat) == -1) {
     printf("404 Not Found: %s (%s)\n", final_path, path);
     handle_http_404(client_socket);
-  } else {
-    /* Check if this is a normal/regular file and not a directory or something
-     * else */
-    if (S_ISREG(path_stat.st_mode)) {
-      struct request *req = zh_malloc(sizeof(*req) + (sizeof(req->iov[0]) * 6));
-      req->iovec_count = 6;
-      req->client_socket = client_socket;
-      send_headers(final_path, path_stat.st_size, req->iov);
-      copy_file_contents(final_path, path_stat.st_size, &req->iov[5]);
-      printf("200 %s %ld bytes\n", final_path, path_stat.st_size);
-      add_write_request(req);
-    } else {
-      handle_http_404(client_socket);
-      printf("404 Not Found: %s\n", final_path);
-    }
+    return;
   }
+
+  /* If this is not a regular file, return 404. */
+  if (!S_ISREG(path_stat.st_mode)) {
+    handle_http_404(client_socket);
+    printf("404 Not Found: %s\n", final_path);
+  }
+
+  struct request *req = zh_malloc(sizeof(*req) + (sizeof(req->iov[0]) * 6));
+  req->iovec_count = 6;
+  req->client_socket = client_socket;
+  send_headers(final_path, path_stat.st_size, req->iov);
+  copy_file_contents(final_path, path_stat.st_size, &req->iov[5]);
+  add_write_request(req);
+
+  printf("200 %s %ld bytes\n", final_path, path_stat.st_size);
 }
 
 /*
