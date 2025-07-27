@@ -5,3 +5,4 @@ My personal implementation of article series [io_uring By Example](https://unixi
 # How to Use
 1. Copy one of the examples from the `examples/` folder into `main.c`.
 2. Compile with `make`
+3. Execute `./main`
