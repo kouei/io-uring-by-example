@@ -12,6 +12,7 @@
 #define DEFAULT_SERVER_PORT 8000
 #define QUEUE_DEPTH 256
 #define READ_SZ 8192
+#define min(x, y) ((x) < (y) ? (x) : (y))
 
 int server_socket;
 struct sockaddr_in client_addr;
@@ -143,7 +144,6 @@ int queue_read_request(int client_socket) {
   req->iov[0].iov_len = READ_SZ;
   req->iov[0].iov_base = malloc(req->iov[0].iov_len);
   req->client_socket = client_socket;
-  memset(req->iov[0].iov_base, 0, req->iov[0].iov_len);
 
   /* Linux kernel 5.5 has support for readv, but not for recv() or read() */
   io_uring_prep_readv(sqe, client_socket, &req->iov[0], 1, 0);
@@ -402,7 +402,8 @@ int handle_read_request(struct request *req) {
 
   /* Get the first line, which will be the request */
   char first_line[1024];
-  if (get_line(req->iov[0].iov_base, first_line, sizeof(first_line))) {
+  size_t first_line_size = min(req->iov[0].iov_len, sizeof(first_line));
+  if (get_line(req->iov[0].iov_base, first_line, first_line_size)) {
     fprintf(stderr, "Malformed request\n");
     exit(1);
   }
