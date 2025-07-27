@@ -234,6 +234,7 @@ void copy_file_contents(char *file_path, off_t file_size, struct iovec *iov) {
       break;
     }
 
+    // Short Read
     if (ret < bytes_to_read) {
       buf += ret;
       bytes_to_read -= ret;
