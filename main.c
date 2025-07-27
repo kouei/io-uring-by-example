@@ -65,9 +65,10 @@ const char *http_404_content = "HTTP/1.0 404 Not Found\r\n"
  * Utility function to convert a string to lower case.
  * */
 
-void strtolower(char *str) {
-  for (; *str; ++str)
+void str_tolower(char *str) {
+  for (; *str; ++str) {
     *str = (char)tolower(*str);
+  }
 }
 /*
  One function that prints the system call and the error details
@@ -266,7 +267,7 @@ const char *get_filename_ext(const char *filename) {
 void prepare_headers(const char *path, off_t len, struct iovec *iov) {
   char small_case_path[1024];
   strcpy(small_case_path, path);
-  strtolower(small_case_path);
+  str_tolower(small_case_path);
 
   const char *str = "HTTP/1.0 200 OK\r\n";
   set_iov(&iov[0], str);
@@ -399,8 +400,7 @@ int handle_read_request(struct request *req) {
   char *path;
   get_verb_and_path(first_line, &verb, &path);
 
-  strtolower(verb);
-
+  str_tolower(verb);
   // We only support the GET verb.
   if (strcmp(verb, "get") == 0) {
     handle_get_verb(path, req->client_socket);
