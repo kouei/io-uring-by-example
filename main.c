@@ -360,7 +360,7 @@ void handle_get_verb(char *path, int client_socket) {
 }
 
 int get_line(const char *src, char *dest, int dest_sz) {
-  for (int i = 0; i < dest_sz; i++) {
+  for (int i = 0; i + 1 < dest_sz; i++) {
     if (src[i] == '\r' && src[i + 1] == '\n') {
       dest[i] = '\0';
       return 0;
