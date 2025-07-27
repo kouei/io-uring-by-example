@@ -389,7 +389,8 @@ int get_line(const char *src, char *dest, int dest_sz) {
 
     dest[i] = src[i];
   }
-  return 1;
+
+  return -1;
 }
 
 int handle_read_request(struct request *req) {
@@ -403,7 +404,8 @@ int handle_read_request(struct request *req) {
   /* Get the first line, which will be the request */
   char first_line[1024];
   size_t first_line_size = min(req->iov[0].iov_len, sizeof(first_line));
-  if (get_line(req->iov[0].iov_base, first_line, first_line_size)) {
+  int ret = get_line(req->iov[0].iov_base, first_line, first_line_size);
+  if (ret < 0) {
     fprintf(stderr, "Malformed request\n");
     exit(1);
   }
