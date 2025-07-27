@@ -358,28 +358,6 @@ void handle_get_verb(char *path, int client_socket) {
   printf("200 %s %ld bytes\n", final_path, path_stat.st_size);
 }
 
-/*
- * This function looks at method used and calls the appropriate handler
- * function. Since we only implement GET and POST methods, it calls
- * handle_unimplemented_method() in case both these don't match. This sends an
- * error to the client.
- * */
-
-void handle_http_verb(char *verb_buffer, int client_socket) {
-  char *saveptr;
-
-  char *http_verb = strtok_r(verb_buffer, " ", &saveptr);
-  strtolower(http_verb);
-
-  char *path = strtok_r(NULL, " ", &saveptr);
-
-  if (strcmp(http_verb, "get") == 0) {
-    handle_get_verb(path, client_socket);
-  } else {
-    handle_unimplemented_method(client_socket);
-  }
-}
-
 int get_line(const char *src, char *dest, int dest_sz) {
   for (int i = 0; i < dest_sz; i++) {
     if (src[i] == '\r' && src[i + 1] == '\n') {
@@ -391,6 +369,12 @@ int get_line(const char *src, char *dest, int dest_sz) {
   }
 
   return -1;
+}
+
+void get_verb_and_path(char *line, char **verb, char **path) {
+  char *save_ptr;
+  *verb = strtok_r(line, " ", &save_ptr);
+  *path = strtok_r(NULL, " ", &save_ptr);
 }
 
 int handle_read_request(struct request *req) {
@@ -409,9 +393,21 @@ int handle_read_request(struct request *req) {
     fprintf(stderr, "Malformed request\n");
     exit(1);
   }
-
   // Now first_line == "GET /index.html HTTP/1.1"
-  handle_http_verb(first_line, req->client_socket);
+
+  char *verb;
+  char *path;
+  get_verb_and_path(first_line, &verb, &path);
+
+  strtolower(verb);
+
+  // We only support the GET verb.
+  if (strcmp(verb, "get") == 0) {
+    handle_get_verb(path, req->client_socket);
+  } else {
+    handle_unimplemented_method(req->client_socket);
+  }
+
   return 0;
 }
 
