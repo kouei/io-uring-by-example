@@ -15,5 +15,5 @@ My personal implementation of article series [io_uring By Example](https://unixi
 ## Code Style Check
 `make clang-tidy`
 
-## Clean-up Binary
+## Clean-up
 `make clean`
