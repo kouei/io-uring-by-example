@@ -1,94 +1,117 @@
-#include <liburing.h>
+#include "liburing.h"
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/utsname.h>
+#include <string.h>
 
-static const char *op_strs[] = {
-    "IORING_OP_NOP",
-    "IORING_OP_READV",
-    "IORING_OP_WRITEV",
-    "IORING_OP_FSYNC",
-    "IORING_OP_READ_FIXED",
-    "IORING_OP_WRITE_FIXED",
-    "IORING_OP_POLL_ADD",
-    "IORING_OP_POLL_REMOVE",
-    "IORING_OP_SYNC_FILE_RANGE",
-    "IORING_OP_SENDMSG",
-    "IORING_OP_RECVMSG",
-    "IORING_OP_TIMEOUT",
-    "IORING_OP_TIMEOUT_REMOVE",
-    "IORING_OP_ACCEPT",
-    "IORING_OP_ASYNC_CANCEL",
-    "IORING_OP_LINK_TIMEOUT",
-    "IORING_OP_CONNECT",
-    "IORING_OP_FALLOCATE",
-    "IORING_OP_OPENAT",
-    "IORING_OP_CLOSE",
-    "IORING_OP_FILES_UPDATE",
-    "IORING_OP_STATX",
-    "IORING_OP_READ",
-    "IORING_OP_WRITE",
-    "IORING_OP_FADVISE",
-    "IORING_OP_MADVISE",
-    "IORING_OP_SEND",
-    "IORING_OP_RECV",
-    "IORING_OP_OPENAT2",
-    "IORING_OP_EPOLL_CTL",
-    "IORING_OP_SPLICE",
-    "IORING_OP_PROVIDE_BUFFERS",
-    "IORING_OP_REMOVE_BUFFERS",
-    "IORING_OP_TEE",
-    "IORING_OP_SHUTDOWN",
-    "IORING_OP_RENAMEAT",
-    "IORING_OP_UNLINKAT",
-    "IORING_OP_MKDIRAT",
-    "IORING_OP_SYMLINKAT",
-    "IORING_OP_LINKAT",
-    "IORING_OP_MSG_RING",
-    "IORING_OP_FSETXATTR",
-    "IORING_OP_SETXATTR",
-    "IORING_OP_FGETXATTR",
-    "IORING_OP_GETXATTR",
-    "IORING_OP_SOCKET",
-    "IORING_OP_URING_CMD",
-    "IORING_OP_SEND_ZC",
-    "IORING_OP_SENDMSG_ZC",
-    "IORING_OP_READ_MULTISHOT",
-    "IORING_OP_WAITID",
-    "IORING_OP_FUTEX_WAIT",
-    "IORING_OP_FUTEX_WAKE",
-    "IORING_OP_FUTEX_WAITV",
-    "IORING_OP_FIXED_FD_INSTALL",
-    "IORING_OP_FTRUNCATE",
-    "IORING_OP_BIND",
-    "IORING_OP_LISTEN",
-    "IORING_OP_RECV_ZC",
-    "IORING_OP_EPOLL_WAIT",
-    "IORING_OP_READV_FIXED",
-    "IORING_OP_WRITEV_FIXED",
-};
+#define QUEUE_DEPTH 8
 
-int main() {
-  int op_strs_size = sizeof(op_strs) / sizeof(op_strs[0]);
-  if (op_strs_size < IORING_OP_LAST) {
-    fprintf(stderr, "Error: \"op_strs\" is outdated. Please copy latest content from "
-                    "\"io_uring.h\", see \"enum io_uring_op\"\n");
+struct io_uring ring;
+
+char buffer[32];
+
+enum task_type { READ, WRITE, CLOSE };
+
+const char *get_task_type_string(enum task_type type) {
+  if (type == READ) {
+    return "READ";
+  } else if (type == WRITE) {
+    return "WRITE";
+  } else if (type == CLOSE) {
+    return "CLOSE";
+  } else {
+    fprintf(stderr, "Unexpected type = %d\n", type);
+    exit(-1);
+  }
+}
+
+void link_operations() {
+  const char *filename = "test.txt";
+  int fd = open(filename, O_RDWR | O_TRUNC | O_CREAT, 0644);
+  // int fd = open(filename, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+  if (fd < 0) {
+    perror("open");
     exit(-1);
   }
 
-  struct utsname u;
-  uname(&u);
-  printf("You are running kernel version: %s\n", u.release);
+  const char str[] = "Hello, io_uring!";
 
-  struct io_uring_probe *probe = io_uring_get_probe();
+  {
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (!sqe) {
+      fprintf(stderr, "Could not get SQE.\n");
+      exit(-1);
+    }
 
-  printf("\nSupported io_uring operations:\n\n");
-  for (int i = 0; i < (int)IORING_OP_LAST; i++) {
-    int is_supported = io_uring_opcode_supported(probe, i);
-    printf("%-27s: %s\n", op_strs[i], is_supported ? "YES" : "NO");
+    io_uring_prep_write(sqe, fd, str, sizeof(str) - 1, 0);
+    enum task_type *type = malloc(sizeof(*type));
+    *type = WRITE;
+    io_uring_sqe_set_data(sqe, type);
+    sqe->flags |= IOSQE_IO_LINK;
   }
 
-  io_uring_free_probe(probe);
+  {
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (!sqe) {
+      fprintf(stderr, "Could not get SQE.\n");
+      exit(-1);
+    }
+
+    io_uring_prep_read(sqe, fd, buffer, sizeof(str) - 1, 0);
+    enum task_type *type = malloc(sizeof(*type));
+    *type = READ;
+    io_uring_sqe_set_data(sqe, type);
+    sqe->flags |= IOSQE_IO_LINK;
+  }
+
+  {
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+    if (!sqe) {
+      fprintf(stderr, "Could not get SQE.\n");
+      exit(-1);
+    }
+
+    io_uring_prep_close(sqe, fd);
+    enum task_type *type = malloc(sizeof(*type));
+    *type = CLOSE;
+    io_uring_sqe_set_data(sqe, type);
+  }
+
+  io_uring_submit(&ring);
+
+  for (int i = 0; i < 3; i++) {
+    struct io_uring_cqe *cqe;
+    int ret = io_uring_wait_cqe(&ring, &cqe);
+    if (ret < 0) {
+      fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
+      exit(-1);
+    }
+
+    enum task_type type = *(enum task_type *)cqe->user_data;
+    const char *type_str = get_task_type_string(type);
+    printf("\nTask Type = %s, Operation Result = %d\n", type_str, cqe->res);
+
+    /* Now that we have the CQE, let's process the data */
+    if (cqe->res < 0) {
+      fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
+    }
+
+    io_uring_cqe_seen(&ring, cqe);
+  }
+
+  printf("\nBuffer contents: %s\n", buffer);
+}
+
+int main() {
+  int ret = io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
+  if (ret) {
+    fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
+    exit(-1);
+  }
+
+  link_operations();
+
+  io_uring_queue_exit(&ring);
 
   return 0;
 }
