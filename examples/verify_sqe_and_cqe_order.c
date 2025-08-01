@@ -33,7 +33,10 @@ void run_write_tasks() {
     int *task_id = malloc(sizeof(*task_id));
     *task_id = i;
     io_uring_sqe_set_data(sqe, task_id);
+
+    printf("Task Created. Task Id = %d\n", *task_id);
   }
+  printf("\n");
 
   io_uring_submit(&ring);
 
@@ -46,7 +49,7 @@ void run_write_tasks() {
     }
 
     int *task_id = (int *)cqe->user_data;
-    printf("\nTask Id = %d, Operation Result = %d\n", *task_id, cqe->res);
+    printf("Task Completed. Task Id = %d, Operation Result = %d\n", *task_id, cqe->res);
 
     if (cqe->res < 0) {
       fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
