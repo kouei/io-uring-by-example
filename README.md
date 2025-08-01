@@ -1,6 +1,8 @@
 # io_uring By Example
 
-My personal implementation of article series [io_uring By Example](https://unixism.net/2020/04/io-uring-by-example-article-series/) by [Shuveb Hussain](https://unixism.net/about-unixism/)
+My personal experimental implementation of article series [io_uring By Example](https://unixism.net/2020/04/io-uring-by-example-article-series/) by [Shuveb Hussain](https://unixism.net/about-unixism/).
+
+My Study Notes published on [Zhihu](https://zhuanlan.zhihu.com/p/1929717237880723045) (Chinese Simplified)
 
 # How to Use
 ## Compile
