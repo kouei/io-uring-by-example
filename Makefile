@@ -15,3 +15,4 @@ clang-format:
 
 clean:
 	rm -f main
+	rm -f test*.txt
