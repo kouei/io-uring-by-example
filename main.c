@@ -48,6 +48,7 @@ void link_operations() {
     *type = WRITE;
     io_uring_sqe_set_data(sqe, type);
     sqe->flags |= IOSQE_IO_LINK;
+    printf("Task Created. Task Type = %s\n", get_task_type_string(*type));
   }
 
   {
@@ -62,6 +63,7 @@ void link_operations() {
     *type = READ;
     io_uring_sqe_set_data(sqe, type);
     sqe->flags |= IOSQE_IO_LINK;
+    printf("Task Created. Task Type = %s\n", get_task_type_string(*type));
   }
 
   {
@@ -75,7 +77,10 @@ void link_operations() {
     enum task_type *type = malloc(sizeof(*type));
     *type = CLOSE;
     io_uring_sqe_set_data(sqe, type);
+    printf("Task Created. Task Type = %s\n", get_task_type_string(*type));
   }
+
+  printf("\n");
 
   io_uring_submit(&ring);
 
@@ -89,7 +94,8 @@ void link_operations() {
 
     enum task_type type = *(enum task_type *)cqe->user_data;
     const char *type_str = get_task_type_string(type);
-    printf("\nTask Type = %s, Operation Result = %d\n", type_str, cqe->res);
+    printf("Task Completed. Task Type = %s, Operation Result = %d\n", type_str,
+           cqe->res);
 
     /* Now that we have the CQE, let's process the data */
     if (cqe->res < 0) {
