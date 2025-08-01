@@ -3,7 +3,8 @@
 This repo contains my personal code implementation during the study of article series [io_uring By Example](https://unixism.net/2020/04/io-uring-by-example-article-series/) by [Shuveb Hussain](https://unixism.net/about-unixism/).
 
 # Study Notes
-I have written a series of study notes on [Zhihu](https://zhuanlan.zhihu.com/p/1929717237880723045) **(Chinese Simplified)**
+I wrote a series of study notes on [Zhihu](https://zhuanlan.zhihu.com/p/1929717237880723045) **(Chinese Simplified)**.
+Feel free to take a look.
 
 # How to Use
 ## Compile
