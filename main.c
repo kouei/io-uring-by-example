@@ -6,106 +6,86 @@
 
 #define QUEUE_DEPTH 8
 
+#define BUF_COUNT 2
+#define BUF_SIZE 512
+
+#define STR                                                                    \
+  "What is this life if, full of care,\nWe have no time to stand and stare.\n"
+
 struct io_uring ring;
 
-char buffer[32];
-
-enum task_type { READ, WRITE, CLOSE };
-
-const char *get_task_type_string(enum task_type type) {
-  if (type == READ) {
-    return "READ";
-  } else if (type == WRITE) {
-    return "WRITE";
-  } else if (type == CLOSE) {
-    return "CLOSE";
-  } else {
-    fprintf(stderr, "Unexpected type = %d\n", type);
-    exit(-1);
-  }
-}
-
-void link_operations() {
+int fixed_buffers() {
   const char *filename = "test.txt";
   int fd = open(filename, O_RDWR | O_TRUNC | O_CREAT, 0644);
-  // int fd = open(filename, O_WRONLY|O_TRUNC|O_CREAT, 0644);
   if (fd < 0) {
     perror("open");
     exit(-1);
   }
 
-  const char str[] = "Hello, io_uring!";
-
-  {
-    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
-    if (!sqe) {
-      fprintf(stderr, "Could not get SQE.\n");
-      exit(-1);
-    }
-
-    io_uring_prep_write(sqe, fd, str, sizeof(str) - 1, 0);
-    enum task_type *type = malloc(sizeof(*type));
-    *type = WRITE;
-    io_uring_sqe_set_data(sqe, type);
-    sqe->flags |= IOSQE_IO_LINK;
-    printf("Task Created. Task Type = %s\n", get_task_type_string(*type));
+  struct iovec iov[BUF_COUNT];
+  for (int i = 0; i < BUF_COUNT; i++) {
+    iov[i].iov_len = BUF_SIZE;
+    iov[i].iov_base = malloc(iov[i].iov_len);
   }
 
-  {
-    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
-    if (!sqe) {
-      fprintf(stderr, "Could not get SQE.\n");
-      exit(-1);
-    }
-
-    io_uring_prep_read(sqe, fd, buffer, sizeof(str) - 1, 0);
-    enum task_type *type = malloc(sizeof(*type));
-    *type = READ;
-    io_uring_sqe_set_data(sqe, type);
-    sqe->flags |= IOSQE_IO_LINK;
-    printf("Task Created. Task Type = %s\n", get_task_type_string(*type));
+  int ret = io_uring_register_buffers(&ring, iov, BUF_COUNT);
+  if (ret) {
+    fprintf(stderr, "Error registering buffers: %s", strerror(-ret));
+    exit(-1);
   }
 
-  {
-    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
-    if (!sqe) {
-      fprintf(stderr, "Could not get SQE.\n");
-      exit(-1);
-    }
-
-    io_uring_prep_close(sqe, fd);
-    enum task_type *type = malloc(sizeof(*type));
-    *type = CLOSE;
-    io_uring_sqe_set_data(sqe, type);
-    printf("Task Created. Task Type = %s\n", get_task_type_string(*type));
+  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+  if (!sqe) {
+    fprintf(stderr, "Could not get SQE.\n");
+    exit(-1);
   }
 
-  printf("\n");
+  memcpy(iov[0].iov_base, STR, sizeof(STR));
+  io_uring_prep_write_fixed(sqe, fd, iov[0].iov_base, sizeof(STR), 0, 0);
 
   io_uring_submit(&ring);
 
-  for (int i = 0; i < 3; i++) {
-    struct io_uring_cqe *cqe;
-    int ret = io_uring_wait_cqe(&ring, &cqe);
-    if (ret < 0) {
-      fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-      exit(-1);
-    }
-
-    enum task_type type = *(enum task_type *)cqe->user_data;
-    const char *type_str = get_task_type_string(type);
-    printf("Task Completed. Task Type = %s, Operation Result = %d\n", type_str,
-           cqe->res);
-
-    /* Now that we have the CQE, let's process the data */
-    if (cqe->res < 0) {
-      fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
-    }
-
-    io_uring_cqe_seen(&ring, cqe);
+  struct io_uring_cqe *cqe;
+  ret = io_uring_wait_cqe(&ring, &cqe);
+  if (ret < 0) {
+    fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
+    exit(-1);
   }
 
-  printf("\nBuffer contents: %s\n", buffer);
+  if (cqe->res < 0) {
+    fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
+  }
+
+  printf("Result of the write operation: %d\n", cqe->res);
+  io_uring_cqe_seen(&ring, cqe);
+
+  sqe = io_uring_get_sqe(&ring);
+  if (!sqe) {
+    fprintf(stderr, "Could not get SQE.\n");
+    exit(-1);
+  }
+
+  io_uring_prep_read_fixed(sqe, fd, iov[1].iov_base, sizeof(STR), 0, 1);
+
+  io_uring_submit(&ring);
+
+  ret = io_uring_wait_cqe(&ring, &cqe);
+  if (ret < 0) {
+    fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
+    exit(-1);
+  }
+
+  if (cqe->res < 0) {
+    fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
+  }
+
+  printf("Result of the read operation: %d\n", cqe->res);
+  io_uring_cqe_seen(&ring, cqe);
+
+  printf("\nContents read from file:\n");
+  printf("%s", (char *)iov[1].iov_base);
+
+  return 0;
 }
 
 int main() {
@@ -115,7 +95,7 @@ int main() {
     exit(-1);
   }
 
-  link_operations();
+  fixed_buffers();
 
   io_uring_queue_exit(&ring);
 
