@@ -37,13 +37,13 @@ void register_files() {
   }
 }
 
-int start_sq_polling_ops() {
+void start_sq_polling_ops() {
   memcpy(buff1, STR, sizeof(STR));
 
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
     fprintf(stderr, "Could not get SQE.\n");
-    return 1;
+    exit(-1);
   }
 
   io_uring_prep_write(sqe, 0, buff1, sizeof(STR), 0);
@@ -55,7 +55,7 @@ int start_sq_polling_ops() {
   int ret = io_uring_wait_cqe(&ring, &cqe);
   if (ret < 0) {
     fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-    return 1;
+    exit(-1);
   }
   /* Now that we have the CQE, let's process the data */
   if (cqe->res < 0) {
@@ -67,7 +67,7 @@ int start_sq_polling_ops() {
   sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
     fprintf(stderr, "Could not get SQE.\n");
-    return 1;
+    exit(-1);
   }
   io_uring_prep_read(sqe, 0, buff2, sizeof(STR), 0);
   sqe->flags |= IOSQE_FIXED_FILE;
@@ -77,7 +77,7 @@ int start_sq_polling_ops() {
   ret = io_uring_wait_cqe(&ring, &cqe);
   if (ret < 0) {
     fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-    return 1;
+    exit(-1);
   }
   /* Now that we have the CQE, let's process the data */
   if (cqe->res < 0) {
@@ -88,14 +88,12 @@ int start_sq_polling_ops() {
 
   printf("Contents read from file:\n");
   printf("%s", buff2);
-
-  return 0;
 }
 
 int main() {
   if (geteuid()) {
     fprintf(stderr, "You need root privileges to run this program.\n");
-    return 1;
+    exit(-1);
   }
 
   struct io_uring_params params = {};
@@ -105,7 +103,7 @@ int main() {
   int ret = io_uring_queue_init_params(8, &ring, &params);
   if (ret) {
     fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
-    return 1;
+    exit(-1);
   }
 
   list_sq_poll_kernel_threads();
