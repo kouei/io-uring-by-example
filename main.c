@@ -6,8 +6,8 @@
 #include <unistd.h>
 
 #define BUF_SIZE 512
-const char STR[] =
-    "What is this life if, full of care,\nWe have no time to stand and stare.";
+const char STR[] = "What is this life if, full of care,\nWe have no time to "
+                   "stand and stare.\n";
 
 struct io_uring ring;
 int fds[1];
@@ -17,9 +17,10 @@ const char *filename = "test.txt";
 
 void list_sq_poll_kernel_threads() {
   printf("\nList SQ Poll Kernel Threads:\n");
-  printf("**************** List Start ****************\n");
+  printf("******************* List Start *******************\n");
+  system("ps -eT | head -n 1"); // To print out the header
   system("ps -eT | grep iou-sqp");
-  printf("****************  List End  ****************\n");
+  printf("*******************  List End  *******************\n\n");
 }
 
 void register_files() {
@@ -49,7 +50,6 @@ int start_sq_polling_ops() {
   sqe->flags |= IOSQE_FIXED_FILE;
 
   io_uring_submit(&ring);
-  list_sq_poll_kernel_threads();
 
   struct io_uring_cqe *cqe;
   int ret = io_uring_wait_cqe(&ring, &cqe);
@@ -93,14 +93,12 @@ int start_sq_polling_ops() {
 }
 
 int main() {
-  struct io_uring_params params;
-
   if (geteuid()) {
     fprintf(stderr, "You need root privileges to run this program.\n");
     return 1;
   }
 
-  memset(&params, 0, sizeof(params));
+  struct io_uring_params params = {};
   params.flags |= IORING_SETUP_SQPOLL;
   params.sq_thread_idle = 600000;
 
@@ -111,11 +109,11 @@ int main() {
   }
 
   list_sq_poll_kernel_threads();
-  
+
   register_files();
-  
+
   start_sq_polling_ops();
-  
+
   io_uring_queue_exit(&ring);
 
   return 0;
