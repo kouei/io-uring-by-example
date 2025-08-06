@@ -1,102 +1,121 @@
-#include "liburing.h"
 #include <fcntl.h>
+#include <liburing.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-#define QUEUE_DEPTH 8
-
-#define BUF_COUNT 2
 #define BUF_SIZE 512
-
-#define STR                                                                    \
-  "What is this life if, full of care,\nWe have no time to stand and stare.\n"
+const char STR[] =
+    "What is this life if, full of care,\nWe have no time to stand and stare.";
 
 struct io_uring ring;
+int fds[1];
+char buff1[BUF_SIZE];
+char buff2[BUF_SIZE];
+const char *filename = "test.txt";
 
-int fixed_buffers() {
-  const char *filename = "test.txt";
-  int fd = open(filename, O_RDWR | O_TRUNC | O_CREAT, 0644);
-  if (fd < 0) {
+void list_sq_poll_kernel_threads() {
+  printf("\nList SQ Poll Kernel Threads:\n");
+  printf("**************** List Start ****************\n");
+  system("ps -eT | grep iou-sqp");
+  printf("****************  List End  ****************\n");
+}
+
+void register_files() {
+  fds[0] = open(filename, O_RDWR | O_TRUNC | O_CREAT, 0644);
+  if (fds[0] < 0) {
     perror("open");
     exit(-1);
   }
 
-  struct iovec iov[BUF_COUNT];
-  for (int i = 0; i < BUF_COUNT; i++) {
-    iov[i].iov_len = BUF_SIZE;
-    iov[i].iov_base = malloc(iov[i].iov_len);
-  }
-
-  int ret = io_uring_register_buffers(&ring, iov, BUF_COUNT);
+  int ret = io_uring_register_files(&ring, fds, 1);
   if (ret) {
     fprintf(stderr, "Error registering buffers: %s", strerror(-ret));
     exit(-1);
   }
+}
+
+int start_sq_polling_ops() {
+  memcpy(buff1, STR, sizeof(STR));
 
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
     fprintf(stderr, "Could not get SQE.\n");
-    exit(-1);
+    return 1;
   }
 
-  memcpy(iov[0].iov_base, STR, sizeof(STR));
-  io_uring_prep_write_fixed(sqe, fd, iov[0].iov_base, sizeof(STR), 0, 0);
+  io_uring_prep_write(sqe, 0, buff1, sizeof(STR), 0);
+  sqe->flags |= IOSQE_FIXED_FILE;
 
   io_uring_submit(&ring);
+  list_sq_poll_kernel_threads();
 
   struct io_uring_cqe *cqe;
-  ret = io_uring_wait_cqe(&ring, &cqe);
+  int ret = io_uring_wait_cqe(&ring, &cqe);
   if (ret < 0) {
     fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-    exit(-1);
+    return 1;
   }
-
+  /* Now that we have the CQE, let's process the data */
   if (cqe->res < 0) {
     fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
   }
-
-  printf("Result of the write operation: %d\n", cqe->res);
+  printf("Result of the operation: %d\n", cqe->res);
   io_uring_cqe_seen(&ring, cqe);
 
   sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
     fprintf(stderr, "Could not get SQE.\n");
-    exit(-1);
+    return 1;
   }
-
-  io_uring_prep_read_fixed(sqe, fd, iov[1].iov_base, sizeof(STR), 0, 1);
+  io_uring_prep_read(sqe, 0, buff2, sizeof(STR), 0);
+  sqe->flags |= IOSQE_FIXED_FILE;
 
   io_uring_submit(&ring);
 
   ret = io_uring_wait_cqe(&ring, &cqe);
   if (ret < 0) {
     fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-    exit(-1);
+    return 1;
   }
-
+  /* Now that we have the CQE, let's process the data */
   if (cqe->res < 0) {
     fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
   }
-
-  printf("Result of the read operation: %d\n", cqe->res);
+  printf("Result of the operation: %d\n", cqe->res);
   io_uring_cqe_seen(&ring, cqe);
 
-  printf("\nContents read from file:\n");
-  printf("%s", (char *)iov[1].iov_base);
+  printf("Contents read from file:\n");
+  printf("%s", buff2);
 
   return 0;
 }
 
 int main() {
-  int ret = io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
-  if (ret) {
-    fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
-    exit(-1);
+  struct io_uring_params params;
+
+  if (geteuid()) {
+    fprintf(stderr, "You need root privileges to run this program.\n");
+    return 1;
   }
 
-  fixed_buffers();
+  memset(&params, 0, sizeof(params));
+  params.flags |= IORING_SETUP_SQPOLL;
+  params.sq_thread_idle = 600000;
 
+  int ret = io_uring_queue_init_params(8, &ring, &params);
+  if (ret) {
+    fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
+    return 1;
+  }
+
+  list_sq_poll_kernel_threads();
+  
+  register_files();
+  
+  start_sq_polling_ops();
+  
   io_uring_queue_exit(&ring);
 
   return 0;
