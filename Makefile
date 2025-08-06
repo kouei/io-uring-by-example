@@ -1,5 +1,5 @@
 C_STD := -std=gnu11
-CC_FLAG := -g -O0 -Wall -luring $(C_STD)
+CC_FLAG := -g -O0 -Wall -luring $(C_STD) -static
 SRC := main.c
 
 main: $(SRC)
