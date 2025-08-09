@@ -16,17 +16,16 @@ char buff2[BUF_SIZE];
 const char *filename = "test.txt";
 
 void list_sq_poll_kernel_threads() {
-  printf("\nList SQ Poll Kernel Threads:\n");
-  printf("******************* List Start *******************\n");
+  printf("\n*********** List SQ Poll Kernel Threads ***********\n");
   system("ps -eT | head -n 1"); // To print out the header
   system("ps -eT | grep iou-sqp");
-  printf("*******************  List End  *******************\n\n");
+  printf("***************************************************\n\n");
 }
 
 void register_files() {
   fds[0] = open(filename, O_RDWR | O_TRUNC | O_CREAT, 0644);
   if (fds[0] < 0) {
-    perror("open");
+    perror("open failed");
     exit(-1);
   }
 
@@ -61,7 +60,7 @@ void start_sq_polling_ops() {
   if (cqe->res < 0) {
     fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
   }
-  printf("Result of the operation: %d\n", cqe->res);
+  printf("Result of the write operation: %d\n", cqe->res);
   io_uring_cqe_seen(&ring, cqe);
 
   sqe = io_uring_get_sqe(&ring);
@@ -83,7 +82,7 @@ void start_sq_polling_ops() {
   if (cqe->res < 0) {
     fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
   }
-  printf("Result of the operation: %d\n", cqe->res);
+  printf("Result of the read operation: %d\n", cqe->res);
   io_uring_cqe_seen(&ring, cqe);
 
   printf("Contents read from file:\n");
@@ -91,9 +90,11 @@ void start_sq_polling_ops() {
 }
 
 int main() {
-  if (geteuid()) {
-    fprintf(stderr, "You need root privileges to run this program.\n");
-    exit(-1);
+  if (geteuid() != 0) {
+    fprintf(stderr, "\n********************* WARNING *********************\n");
+    fprintf(stderr, " You don't have root privileges.                     \n");
+    fprintf(stderr, " However, this is fine for kernel version > 5.11     \n");
+    fprintf(stderr, "***************************************************\n\n");
   }
 
   struct io_uring_params params = {};
