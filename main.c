@@ -1,112 +1,102 @@
 #include <fcntl.h>
 #include <liburing.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <unistd.h>
 
 #define QUEUE_DEPTH 8
-#define BUF_SIZE 512
-const char STR[] = "What is this life if, full of care,\nWe have no time to "
-                   "stand and stare.\n";
+#define BUFF_SZ 512
 
+char buff[BUFF_SZ + 1];
 struct io_uring ring;
-int fds[1];
-char buff1[BUF_SIZE];
-char buff2[BUF_SIZE];
-const char *filename = "test.txt";
 
-void list_sq_poll_kernel_threads() {
-  printf("\n*********** List SQ Poll Kernel Threads ***********\n");
-  system("ps -eT | head -n 1"); // To print out the header
-  system("ps -eT | grep iou-sqp");
-  printf("***************************************************\n\n");
+void error_exit(char *message) {
+  perror(message);
+  exit(EXIT_FAILURE);
 }
 
-void open_files() {
-  fds[0] = open(filename, O_RDWR | O_TRUNC | O_CREAT, 0644);
-  if (fds[0] < 0) {
-    perror("open failed");
+void *listener_thread(void *data) {
+  printf("%s: Waiting for completion event...\n", __FUNCTION__);
+
+  int efd = *(int *)data;
+  eventfd_t v;
+  int ret = eventfd_read(efd, &v);
+  if (ret < 0) {
+    error_exit("eventfd_read");
+  }
+
+  printf("%s: Got completion event.\n", __FUNCTION__);
+
+  struct io_uring_cqe *cqe;
+  ret = io_uring_wait_cqe(&ring, &cqe);
+  if (ret < 0) {
+    fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
+    return NULL;
+  }
+  /* Now that we have the CQE, let's process it */
+  if (cqe->res < 0) {
+    fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
+  }
+  printf("Result of the operation: %d\n", cqe->res);
+  io_uring_cqe_seen(&ring, cqe);
+
+  printf("Contents read from file:\n%s\n", buff);
+  return NULL;
+}
+
+void setup_io_uring(int efd) {
+  int ret = io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
+  if (ret) {
+    fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
     exit(-1);
   }
+
+  io_uring_register_eventfd(&ring, efd);
 }
 
-void start_sq_polling_ops() {
-  memcpy(buff1, STR, sizeof(STR));
-
+void read_file_with_io_uring() {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
     fprintf(stderr, "Could not get SQE.\n");
     exit(-1);
   }
 
-  io_uring_prep_write(sqe, fds[0], buff1, sizeof(STR), 0);
-
+  int fd = open("test.txt", O_RDONLY);
+  io_uring_prep_read(sqe, fd, buff, BUFF_SZ, 0);
   io_uring_submit(&ring);
-
-  struct io_uring_cqe *cqe;
-  int ret = io_uring_wait_cqe(&ring, &cqe);
-  if (ret < 0) {
-    fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-    exit(-1);
-  }
-  /* Now that we have the CQE, let's process the data */
-  if (cqe->res < 0) {
-    fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
-  }
-  printf("Result of the write operation: %d\n", cqe->res);
-  io_uring_cqe_seen(&ring, cqe);
-
-  sqe = io_uring_get_sqe(&ring);
-  if (!sqe) {
-    fprintf(stderr, "Could not get SQE.\n");
-    exit(-1);
-  }
-  io_uring_prep_read(sqe, fds[0], buff2, sizeof(STR), 0);
-
-  io_uring_submit(&ring);
-
-  ret = io_uring_wait_cqe(&ring, &cqe);
-  if (ret < 0) {
-    fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-    exit(-1);
-  }
-  /* Now that we have the CQE, let's process the data */
-  if (cqe->res < 0) {
-    fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
-  }
-  printf("Result of the read operation: %d\n", cqe->res);
-  io_uring_cqe_seen(&ring, cqe);
-
-  printf("Contents read from file:\n");
-  printf("%s", buff2);
 }
 
 int main() {
-  if (geteuid() != 0) {
-    fprintf(stderr, "\n********************* WARNING *********************\n");
-    fprintf(stderr, " You don't have root privileges.                     \n");
-    fprintf(stderr, " However, this is fine for kernel version >= 5.11    \n");
-    fprintf(stderr, "***************************************************\n\n");
+  /* Create an eventfd instance */
+  int efd = eventfd(0, 0);
+  if (efd < 0) {
+    error_exit("eventfd");
   }
 
-  struct io_uring_params params = {};
-  params.flags |= IORING_SETUP_SQPOLL;
-  params.sq_thread_idle = 2000;
+  /* Create the listener thread */
+  pthread_t thread;
+  int *data = malloc(sizeof(efd));
+  *data = efd;
+  pthread_create(&thread, NULL, listener_thread, data);
 
-  int ret = io_uring_queue_init_params(QUEUE_DEPTH, &ring, &params);
-  if (ret) {
-    fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
-    exit(-1);
-  }
+  sleep(2);
 
-  list_sq_poll_kernel_threads();
+  /* Setup io_uring instance and register the eventfd */
+  setup_io_uring(efd);
 
-  open_files();
+  /* Initiate a read with io_uring */
+  read_file_with_io_uring();
 
-  start_sq_polling_ops();
+  /* Wait for listener thread to complete */
+  pthread_join(thread, NULL);
 
+  free(data);
+
+  /* All done. Clean up and exit. */
   io_uring_queue_exit(&ring);
 
-  return 0;
+  return EXIT_SUCCESS;
 }
