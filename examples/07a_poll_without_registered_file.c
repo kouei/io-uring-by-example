@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#define QUEUE_DEPTH 8
 #define BUF_SIZE 512
 const char STR[] = "What is this life if, full of care,\nWe have no time to "
                    "stand and stare.\n";
