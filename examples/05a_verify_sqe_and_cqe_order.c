@@ -49,7 +49,8 @@ void run_write_tasks() {
     }
 
     int *task_id = (int *)cqe->user_data;
-    printf("Task Completed. Task Id = %d, Operation Result = %d\n", *task_id, cqe->res);
+    printf("Task Completed. Task Id = %d, Operation Result = %d\n", *task_id,
+           cqe->res);
 
     if (cqe->res < 0) {
       fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));

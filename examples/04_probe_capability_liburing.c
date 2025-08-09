@@ -71,8 +71,9 @@ static const char *op_strs[] = {
 int main() {
   int op_strs_size = sizeof(op_strs) / sizeof(op_strs[0]);
   if (op_strs_size < IORING_OP_LAST) {
-    fprintf(stderr, "Error: \"op_strs\" is outdated. Please copy latest content from "
-                    "\"io_uring.h\", see \"enum io_uring_op\"\n");
+    fprintf(stderr,
+            "Error: \"op_strs\" is outdated. Please copy latest content from "
+            "\"io_uring.h\", see \"enum io_uring_op\"\n");
     exit(EXIT_FAILURE);
   }
 
