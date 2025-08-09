@@ -109,5 +109,5 @@ int main(int argc, char *argv[]) {
     read_and_print_file(argv[i]);
   }
 
-  return 0;
+  return EXIT_SUCCESS;
 }
