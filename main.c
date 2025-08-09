@@ -10,7 +10,7 @@
 #define QUEUE_DEPTH 8
 #define BUFF_SZ 512
 
-char buff[BUFF_SZ + 1];
+char buff[BUFF_SZ];
 struct io_uring ring;
 
 void error_exit(char *message) {
@@ -36,10 +36,11 @@ void *listener_thread(void *data) {
     fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
     return NULL;
   }
-  /* Now that we have the CQE, let's process it */
+
   if (cqe->res < 0) {
     fprintf(stderr, "Error in async operation: %s\n", strerror(-cqe->res));
   }
+
   printf("Result of the operation: %d\n", cqe->res);
   io_uring_cqe_seen(&ring, cqe);
 
@@ -65,7 +66,7 @@ void read_file_with_io_uring() {
   }
 
   int fd = open("test.txt", O_RDONLY);
-  io_uring_prep_read(sqe, fd, buff, BUFF_SZ, 0);
+  io_uring_prep_read(sqe, fd, buff, BUFF_SZ - 1, 0);
   io_uring_submit(&ring);
 }
 
@@ -80,7 +81,10 @@ int main() {
   pthread_t thread;
   int *data = malloc(sizeof(efd));
   *data = efd;
-  pthread_create(&thread, NULL, listener_thread, data);
+  int ret = pthread_create(&thread, NULL, listener_thread, data);
+  if (ret < 0) {
+    error_exit("pthread_create");
+  }
 
   sleep(2);
 
