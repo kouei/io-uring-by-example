@@ -5,12 +5,13 @@
 #include <string.h>
 #include <unistd.h>
 
+#define FDS_SIZE 1
 #define BUF_SIZE 512
 const char STR[] = "What is this life if, full of care,\nWe have no time to "
                    "stand and stare.\n";
 
 struct io_uring ring;
-int fds[1];
+int fds[FDS_SIZE];
 char buff1[BUF_SIZE];
 char buff2[BUF_SIZE];
 const char *filename = "test.txt";
@@ -29,7 +30,7 @@ void register_files() {
     exit(-1);
   }
 
-  int ret = io_uring_register_files(&ring, fds, 1);
+  int ret = io_uring_register_files(&ring, fds, FDS_SIZE);
   if (ret) {
     fprintf(stderr, "Error registering buffers: %s", strerror(-ret));
     exit(-1);
