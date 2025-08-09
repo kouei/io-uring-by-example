@@ -2,7 +2,7 @@ C_STD := -std=gnu11
 CC_FLAG := -g -O0 -Wall -luring $(C_STD) -static
 SRC := main.c examples/*
 
-main: $(SRC)
+main: main.c
 	gcc $^ $(CC_FLAG) -o $@
 
 .PHONY: clang-tidy clang-format clean
