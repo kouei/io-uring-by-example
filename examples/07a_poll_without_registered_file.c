@@ -91,7 +91,7 @@ int main() {
 
   struct io_uring_params params = {};
   params.flags |= IORING_SETUP_SQPOLL;
-  params.sq_thread_idle = 600000;
+  params.sq_thread_idle = 2000;
 
   int ret = io_uring_queue_init_params(8, &ring, &params);
   if (ret) {
