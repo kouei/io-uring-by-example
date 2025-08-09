@@ -81,7 +81,7 @@ off_t get_file_size(int fd) {
 
   if (fstat(fd, &st) < 0) {
     fprintf(stderr, "fstat");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   // Is regular file
@@ -94,13 +94,13 @@ off_t get_file_size(int fd) {
     unsigned long long bytes;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
       fprintf(stderr, "ioctl");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     return bytes;
   }
 
-  exit(-1);
+  exit(EXIT_FAILURE);
 }
 
 void *aligned_malloc(size_t alignment, size_t size) {
@@ -108,7 +108,7 @@ void *aligned_malloc(size_t alignment, size_t size) {
 
   if (posix_memalign(&buf, alignment, size)) {
     fprintf(stderr, "posix_memalign");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   return buf;
@@ -167,7 +167,7 @@ int app_setup_uring(struct submitter *submitter) {
   submitter->ring_fd = io_uring_setup(QUEUE_DEPTH, &params);
   if (submitter->ring_fd < 0) {
     fprintf(stderr, "io_uring_setup");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   print_io_uring_params(&params);
@@ -198,7 +198,7 @@ int app_setup_uring(struct submitter *submitter) {
              submitter->ring_fd, IORING_OFF_SQ_RING);
     if (sq_ptr == MAP_FAILED) {
       fprintf(stderr, "mmap SQ");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     cq_ptr = sq_ptr;
@@ -208,7 +208,7 @@ int app_setup_uring(struct submitter *submitter) {
              submitter->ring_fd, IORING_OFF_SQ_RING);
     if (sq_ptr == MAP_FAILED) {
       fprintf(stderr, "mmap SQ");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     cq_ptr =
@@ -216,7 +216,7 @@ int app_setup_uring(struct submitter *submitter) {
              submitter->ring_fd, IORING_OFF_CQ_RING);
     if (cq_ptr == MAP_FAILED) {
       fprintf(stderr, "mmap CQ");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
   }
 
@@ -236,7 +236,7 @@ int app_setup_uring(struct submitter *submitter) {
            submitter->ring_fd, IORING_OFF_SQES);
   if (submitter->sq_ring.sqes == MAP_FAILED) {
     fprintf(stderr, "mmap SQE array");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   /* Save useful fields in a global app_io_cq_ring struct for later
@@ -314,12 +314,12 @@ void submit_to_sq(char *file_path, struct submitter *submitter) {
   int file_fd = open(file_path, O_RDONLY);
   if (file_fd < 0) {
     fprintf(stderr, "open");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   off_t file_sz = get_file_size(file_fd);
   if (file_sz < 0) {
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   off_t blocks = div_round_up(file_sz, BLOCK_SZ);
@@ -327,7 +327,7 @@ void submit_to_sq(char *file_path, struct submitter *submitter) {
   struct file_info *fi = malloc(sizeof(*fi) + sizeof(fi->iovecs[0]) * blocks);
   if (!fi) {
     fprintf(stderr, "Unable to allocate memory\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
   fi->file_sz = file_sz;
 
@@ -375,20 +375,20 @@ void submit_to_sq(char *file_path, struct submitter *submitter) {
   int ret = io_uring_enter(submitter->ring_fd, 1, 1, IORING_ENTER_GETEVENTS);
   if (ret < 0) {
     fprintf(stderr, "io_uring_enter");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 }
 
 int main(int argc, char *argv[]) {
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   struct submitter submitter = {};
   if (app_setup_uring(&submitter)) {
     fprintf(stderr, "Unable to setup uring!\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   for (int i = 1; i < argc; i++) {
@@ -396,5 +396,5 @@ int main(int argc, char *argv[]) {
     read_from_cq(&submitter);
   }
 
-  return 0;
+  return EXIT_SUCCESS;
 }

@@ -20,13 +20,13 @@ void run_write_tasks() {
     int fd = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0644);
     if (fd < 0) {
       perror("open");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
     if (!sqe) {
       fprintf(stderr, "Could not get SQE.\n");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     io_uring_prep_write(sqe, fd, str, str_len, 0);
@@ -45,7 +45,7 @@ void run_write_tasks() {
     int ret = io_uring_wait_cqe(&ring, &cqe);
     if (ret < 0) {
       fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     int *task_id = (int *)cqe->user_data;
@@ -63,12 +63,12 @@ int main() {
   int ret = io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
   if (ret) {
     fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   run_write_tasks();
 
   io_uring_queue_exit(&ring);
 
-  return 0;
+  return EXIT_SUCCESS;
 }

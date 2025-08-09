@@ -73,7 +73,7 @@ int main() {
   if (op_strs_size < IORING_OP_LAST) {
     fprintf(stderr, "Error: \"op_strs\" is outdated. Please copy latest content from "
                     "\"io_uring.h\", see \"enum io_uring_op\"\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   struct utsname u;
@@ -90,5 +90,5 @@ int main() {
 
   io_uring_free_probe(probe);
 
-  return 0;
+  return EXIT_SUCCESS;
 }

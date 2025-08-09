@@ -31,7 +31,7 @@ static off_t get_file_size(int fd) {
 
   if (fstat(fd, &st) < 0) {
     fprintf(stderr, "fstat() failed.");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   if (S_ISREG(st.st_mode)) {
@@ -42,21 +42,21 @@ static off_t get_file_size(int fd) {
     off_t bytes;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
       fprintf(stderr, "ioctl() failed.");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     return bytes;
   }
 
   fprintf(stderr, "Unsupported st_mode = %u", st.st_mode);
-  exit(-1);
+  exit(EXIT_FAILURE);
 }
 
 static void requeue_task(struct io_task *task) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   if (task->is_read) {
@@ -96,7 +96,7 @@ static void queue_write(struct io_task *task) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   task->is_read = false;
@@ -134,7 +134,7 @@ void spawn_read_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
     int ret = io_uring_submit(&ring);
     if (ret < 0) {
       fprintf(stderr, "io_uring_submit failed: %s\n", strerror(-ret));
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
   }
 }
@@ -149,7 +149,7 @@ void spawn_write_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
       int ret = io_uring_wait_cqe(&ring, &cqe);
       if (ret < 0) {
         fprintf(stderr, "io_uring_wait_cqe failed: %s\n", strerror(-ret));
-        exit(-1);
+        exit(EXIT_FAILURE);
       }
 
       already_found_completed_task = true;
@@ -162,7 +162,7 @@ void spawn_write_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
 
       if (ret < 0) {
         fprintf(stderr, "io_uring_peek_cqe failed: %s\n", strerror(-ret));
-        exit(-1);
+        exit(EXIT_FAILURE);
       }
     }
 
@@ -176,7 +176,7 @@ void spawn_write_tasks(unsigned long *read_tasks, unsigned long *write_tasks,
 
     if (cqe->res < 0) {
       fprintf(stderr, "cqe failed: %s\n", strerror(-cqe->res));
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     if (cqe->res != task->iov.iov_len) {
@@ -226,25 +226,25 @@ void copy_file(off_t file_size) {
 int main(int argc, char *argv[]) {
   if (argc != 3) {
     printf("Usage: %s <infile> <outfile>\n", argv[0]);
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   infd = open(argv[1], O_RDONLY);
   if (infd < 0) {
     fprintf(stderr, "open infile failed");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   outfd = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (outfd < 0) {
     fprintf(stderr, "open outfile failed");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   int ret = io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
   if (ret < 0) {
     fprintf(stderr, "io_uring_queue_init failed: %s\n", strerror(-ret));
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   off_t insize = get_file_size(infd);
@@ -255,5 +255,5 @@ int main(int argc, char *argv[]) {
   close(outfd);
   close(infd);
 
-  return 0;
+  return EXIT_SUCCESS;
 }

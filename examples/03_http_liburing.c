@@ -120,7 +120,7 @@ void queue_accept_request() {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   io_uring_prep_accept(sqe, server_socket, (struct sockaddr *)&client_addr,
@@ -137,7 +137,7 @@ int queue_read_request(int client_socket) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   struct request *req = malloc(sizeof(*req) + sizeof(req->iov[0]));
@@ -157,7 +157,7 @@ int queue_write_request(struct request *req) {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (sqe == NULL) {
     fprintf(stderr, "io_uring_get_sqe() failed.");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   req->event_type = EVENT_TYPE_WRITE;
@@ -304,7 +304,7 @@ void prepare_headers(const char *path, off_t len, struct iovec *iov) {
     strcpy(send_buffer, "Content-Type: text/plain\r\n");
   } else {
     fprintf(stderr, "Unexpected file extension = %s\n", file_ext);
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   set_iov(&iov[2], send_buffer);
@@ -480,5 +480,5 @@ int main() {
 
   server_loop();
 
-  return 0;
+  return EXIT_SUCCESS;
 }

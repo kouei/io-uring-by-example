@@ -27,7 +27,7 @@ void open_files() {
   fds[0] = open(filename, O_RDWR | O_TRUNC | O_CREAT, 0644);
   if (fds[0] < 0) {
     perror("open failed");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 }
 
@@ -37,7 +37,7 @@ void start_sq_polling_ops() {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
     fprintf(stderr, "Could not get SQE.\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   io_uring_prep_write(sqe, fds[0], buff1, sizeof(STR) - 1, 0);
@@ -48,7 +48,7 @@ void start_sq_polling_ops() {
   int ret = io_uring_wait_cqe(&ring, &cqe);
   if (ret < 0) {
     fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
   /* Now that we have the CQE, let's process the data */
   if (cqe->res < 0) {
@@ -60,7 +60,7 @@ void start_sq_polling_ops() {
   sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
     fprintf(stderr, "Could not get SQE.\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
   io_uring_prep_read(sqe, fds[0], buff2, sizeof(STR) - 1, 0);
 
@@ -69,7 +69,7 @@ void start_sq_polling_ops() {
   ret = io_uring_wait_cqe(&ring, &cqe);
   if (ret < 0) {
     fprintf(stderr, "Error waiting for completion: %s\n", strerror(-ret));
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
   /* Now that we have the CQE, let's process the data */
   if (cqe->res < 0) {
@@ -97,7 +97,7 @@ int main() {
   int ret = io_uring_queue_init_params(QUEUE_DEPTH, &ring, &params);
   if (ret) {
     fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   list_sq_poll_kernel_threads();
@@ -108,5 +108,5 @@ int main() {
 
   io_uring_queue_exit(&ring);
 
-  return 0;
+  return EXIT_SUCCESS;
 }

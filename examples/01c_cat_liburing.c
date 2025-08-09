@@ -27,7 +27,7 @@ off_t get_file_size(int fd) {
 
   if (fstat(fd, &st) < 0) {
     fprintf(stderr, "fstat");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   // Is regular file
@@ -40,13 +40,13 @@ off_t get_file_size(int fd) {
     unsigned long long bytes;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
       fprintf(stderr, "ioctl");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     return bytes;
   }
 
-  exit(-1);
+  exit(EXIT_FAILURE);
 }
 
 void *aligned_malloc(size_t alignment, size_t size) {
@@ -54,7 +54,7 @@ void *aligned_malloc(size_t alignment, size_t size) {
 
   if (posix_memalign(&buf, alignment, size)) {
     fprintf(stderr, "posix_memalign");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   return buf;
@@ -81,12 +81,12 @@ void get_completion_and_print(struct io_uring *ring) {
   int ret = io_uring_wait_cqe(ring, &cqe);
   if (ret < 0) {
     fprintf(stderr, "io_uring_wait_cqe");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   if (cqe->res < 0) {
     fprintf(stderr, "Async readv failed.\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   // Get the "user_data" defined in struct io_uring_cqe
@@ -109,7 +109,7 @@ void submit_read_request(char *file_path, struct io_uring *ring) {
   int file_fd = open(file_path, O_RDONLY);
   if (file_fd < 0) {
     fprintf(stderr, "open");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   off_t file_sz = get_file_size(file_fd);
@@ -117,7 +117,7 @@ void submit_read_request(char *file_path, struct io_uring *ring) {
   struct file_info *fi = malloc(sizeof(*fi) + sizeof(fi->iovecs[0]) * blocks);
   if (!fi) {
     fprintf(stderr, "Unable to allocate memory\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
   fi->file_sz = file_sz;
 
@@ -147,7 +147,7 @@ void submit_read_request(char *file_path, struct io_uring *ring) {
 int main(int argc, char *argv[]) {
   if (argc < 2) {
     fprintf(stderr, "Usage: %s [file name] <[file name] ...>\n", argv[0]);
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   struct io_uring ring;
@@ -162,5 +162,5 @@ int main(int argc, char *argv[]) {
   /* Call the clean-up function. */
   io_uring_queue_exit(&ring);
 
-  return 0;
+  return EXIT_SUCCESS;
 }

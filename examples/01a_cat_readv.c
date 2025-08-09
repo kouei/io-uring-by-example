@@ -16,7 +16,7 @@ off_t get_file_size(int fd) {
 
   if (fstat(fd, &st) < 0) {
     fprintf(stderr, "fstat");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   // Regular File
@@ -29,13 +29,13 @@ off_t get_file_size(int fd) {
     unsigned long long bytes;
     if (ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
       fprintf(stderr, "ioctl");
-      exit(-1);
+      exit(EXIT_FAILURE);
     }
 
     return bytes;
   }
 
-  exit(-1);
+  exit(EXIT_FAILURE);
 }
 
 void *aligned_malloc(size_t alignment, size_t size) {
@@ -43,7 +43,7 @@ void *aligned_malloc(size_t alignment, size_t size) {
 
   if (posix_memalign(&buf, alignment, size)) {
     fprintf(stderr, "posix_memalign");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   return buf;
@@ -59,7 +59,7 @@ void read_and_print_file(char *file_name) {
   int file_fd = open(file_name, O_RDONLY);
   if (file_fd < 0) {
     fprintf(stderr, "open");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   off_t file_sz = get_file_size(file_fd);
@@ -89,7 +89,7 @@ void read_and_print_file(char *file_name) {
   int ret = readv(file_fd, iovecs, blocks);
   if (ret < 0) {
     fprintf(stderr, "readv");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   for (int i = 0; i < blocks; ++i) {
@@ -102,7 +102,7 @@ void read_and_print_file(char *file_name) {
 int main(int argc, char *argv[]) {
   if (argc < 2) {
     fprintf(stderr, "Usage: %s <filename1> [<filename2> ...]\n", argv[0]);
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   for (int i = 1; i < argc; ++i) {
