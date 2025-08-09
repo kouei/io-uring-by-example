@@ -85,7 +85,7 @@ int main() {
   if (geteuid() != 0) {
     fprintf(stderr, "\n********************* WARNING *********************\n");
     fprintf(stderr, " You don't have root privileges.                     \n");
-    fprintf(stderr, " However, this is fine for kernel version > 5.11     \n");
+    fprintf(stderr, " However, this is fine for kernel version >= 5.11    \n");
     fprintf(stderr, "***************************************************\n\n");
   }
 
