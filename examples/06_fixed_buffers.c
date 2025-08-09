@@ -40,8 +40,8 @@ int fixed_buffers() {
     exit(-1);
   }
 
-  memcpy(iov[0].iov_base, STR, sizeof(STR));
-  io_uring_prep_write_fixed(sqe, fd, iov[0].iov_base, sizeof(STR), 0, 0);
+  memcpy(iov[0].iov_base, STR, sizeof(STR) - 1);
+  io_uring_prep_write_fixed(sqe, fd, iov[0].iov_base, sizeof(STR) - 1, 0, 0);
 
   io_uring_submit(&ring);
 
@@ -65,7 +65,7 @@ int fixed_buffers() {
     exit(-1);
   }
 
-  io_uring_prep_read_fixed(sqe, fd, iov[1].iov_base, sizeof(STR), 0, 1);
+  io_uring_prep_read_fixed(sqe, fd, iov[1].iov_base, sizeof(STR) - 1, 0, 1);
 
   io_uring_submit(&ring);
 

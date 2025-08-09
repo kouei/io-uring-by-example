@@ -39,7 +39,7 @@ void register_files() {
 }
 
 void start_sq_polling_ops() {
-  memcpy(buff1, STR, sizeof(STR));
+  memcpy(buff1, STR, sizeof(STR) - 1);
 
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
@@ -47,7 +47,7 @@ void start_sq_polling_ops() {
     exit(-1);
   }
 
-  io_uring_prep_write(sqe, 0, buff1, sizeof(STR), 0);
+  io_uring_prep_write(sqe, 0, buff1, sizeof(STR) - 1, 0);
   sqe->flags |= IOSQE_FIXED_FILE;
 
   io_uring_submit(&ring);
@@ -70,7 +70,7 @@ void start_sq_polling_ops() {
     fprintf(stderr, "Could not get SQE.\n");
     exit(-1);
   }
-  io_uring_prep_read(sqe, 0, buff2, sizeof(STR), 0);
+  io_uring_prep_read(sqe, 0, buff2, sizeof(STR) - 1, 0);
   sqe->flags |= IOSQE_FIXED_FILE;
 
   io_uring_submit(&ring);
