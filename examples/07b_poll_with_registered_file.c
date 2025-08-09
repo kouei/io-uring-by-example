@@ -102,7 +102,7 @@ int main() {
   params.flags |= IORING_SETUP_SQPOLL;
   params.sq_thread_idle = 2000;
 
-  int ret = io_uring_queue_init_params(8, &ring, &params);
+  int ret = io_uring_queue_init_params(QUEUE_DEPTH, &ring, &params);
   if (ret) {
     fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
     exit(-1);
