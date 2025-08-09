@@ -22,16 +22,10 @@ void list_sq_poll_kernel_threads() {
   printf("***************************************************\n\n");
 }
 
-void register_files() {
+void open_files() {
   fds[0] = open(filename, O_RDWR | O_TRUNC | O_CREAT, 0644);
   if (fds[0] < 0) {
     perror("open failed");
-    exit(-1);
-  }
-
-  int ret = io_uring_register_files(&ring, fds, 1);
-  if (ret) {
-    fprintf(stderr, "Error registering buffers: %s", strerror(-ret));
     exit(-1);
   }
 }
@@ -45,8 +39,7 @@ void start_sq_polling_ops() {
     exit(-1);
   }
 
-  io_uring_prep_write(sqe, 0, buff1, sizeof(STR), 0);
-  sqe->flags |= IOSQE_FIXED_FILE;
+  io_uring_prep_write(sqe, fds[0], buff1, sizeof(STR), 0);
 
   io_uring_submit(&ring);
 
@@ -68,8 +61,7 @@ void start_sq_polling_ops() {
     fprintf(stderr, "Could not get SQE.\n");
     exit(-1);
   }
-  io_uring_prep_read(sqe, 0, buff2, sizeof(STR), 0);
-  sqe->flags |= IOSQE_FIXED_FILE;
+  io_uring_prep_read(sqe, fds[0], buff2, sizeof(STR), 0);
 
   io_uring_submit(&ring);
 
@@ -109,7 +101,7 @@ int main() {
 
   list_sq_poll_kernel_threads();
 
-  register_files();
+  open_files();
 
   start_sq_polling_ops();
 
