@@ -10,6 +10,7 @@
 #define QUEUE_DEPTH 8
 #define BUFF_SZ 512
 
+int efd;
 char buff[BUFF_SZ];
 struct io_uring ring;
 
@@ -21,7 +22,6 @@ void error_exit(char *message) {
 void *listener_thread(void *data) {
   printf("%s: Waiting for completion event...\n", __FUNCTION__);
 
-  int efd = *(int *)data;
   eventfd_t v;
   int ret = eventfd_read(efd, &v);
   if (ret < 0) {
@@ -48,11 +48,11 @@ void *listener_thread(void *data) {
   return NULL;
 }
 
-void setup_io_uring(int efd) {
+void setup_io_uring() {
   int ret = io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
   if (ret) {
     fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   io_uring_register_eventfd(&ring, efd);
@@ -62,7 +62,7 @@ void read_file_with_io_uring() {
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
     fprintf(stderr, "Could not get SQE.\n");
-    exit(-1);
+    exit(EXIT_FAILURE);
   }
 
   int fd = open("test.txt", O_RDONLY);
@@ -72,32 +72,29 @@ void read_file_with_io_uring() {
 
 int main() {
   /* Create an eventfd instance */
-  int efd = eventfd(0, 0);
+  efd = eventfd(0, 0);
   if (efd < 0) {
     error_exit("eventfd");
   }
 
+  /* Setup io_uring instance and register the eventfd */
+  setup_io_uring();
+
   /* Create the listener thread */
   pthread_t thread;
-  int *data = malloc(sizeof(efd));
-  *data = efd;
-  int ret = pthread_create(&thread, NULL, listener_thread, data);
+  int ret = pthread_create(&thread, NULL, listener_thread, NULL);
   if (ret < 0) {
     error_exit("pthread_create");
   }
 
-  sleep(2);
-
-  /* Setup io_uring instance and register the eventfd */
-  setup_io_uring(efd);
+  /* Sleep 5 sec to ensure child thread stuck on eventfd_read() */
+  sleep(5);
 
   /* Initiate a read with io_uring */
   read_file_with_io_uring();
 
   /* Wait for listener thread to complete */
   pthread_join(thread, NULL);
-
-  free(data);
 
   /* All done. Clean up and exit. */
   io_uring_queue_exit(&ring);
